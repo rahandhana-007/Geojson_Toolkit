@@ -16,6 +16,7 @@
       layerGroup: null,
       bsreLayer: null,
       bsreLoading: false,
+      identityConfirmed: false,
       isLocating: false
     },
     reader: {
@@ -247,10 +248,21 @@
   function setupMaker() {
     el("makerName").addEventListener("input", updateMakerAvailability);
     el("makerOwner").addEventListener("input", updateMakerAvailability);
+    el("confirmIdentityBtn").addEventListener("click", confirmMakerIdentity);
     el("takePointBtn").addEventListener("click", takeGpsPoint);
     el("loadBsreBtn").addEventListener("click", loadBsreLayer);
     el("resetMakerBtn").addEventListener("click", resetMaker);
     el("downloadMakerBtn").addEventListener("click", downloadMakerGeoJSON);
+    el("manualCoordinateBtn").addEventListener("click", toggleManualCoordinatePanel);
+    el("closeManualCoordinateBtn").addEventListener("click", () => closeManualCoordinatePanel(false));
+    el("cancelManualCoordinateBtn").addEventListener("click", () => closeManualCoordinatePanel(false));
+    el("addManualCoordinatesBtn").addEventListener("click", addManualCoordinates);
+    el("manualCoordinatesInput").addEventListener("keydown", (event) => {
+      if ((event.ctrlKey || event.metaKey) && event.key === "Enter") {
+        event.preventDefault();
+        addManualCoordinates();
+      }
+    });
 
     el("pointTableBody").addEventListener("click", (event) => {
       const button = event.target.closest(".delete-point");
@@ -263,6 +275,135 @@
     });
 
     updateMakerAvailability();
+  }
+
+  function confirmMakerIdentity() {
+    const name = el("makerName").value.trim();
+    const owner = el("makerOwner").value.trim();
+
+    if (!name || !owner) {
+      showToast("Identitas belum lengkap", "Isi nama lahan dan nama pemilik sebelum menekan Confirm.", "warning");
+      (!name ? el("makerName") : el("makerOwner")).focus();
+      return;
+    }
+
+    state.maker.identityConfirmed = true;
+    el("makerIdentityPanel").hidden = true;
+    setGpsStatus("", "Siap mengambil lokasi", "Identitas terkunci. Aktifkan izin lokasi pada browser Anda.");
+    updateMakerAvailability();
+
+    window.setTimeout(() => {
+      state.maker.map.invalidateSize({ pan: false });
+      el("takePointBtn").focus();
+    }, 80);
+
+    showToast("Identitas dikonfirmasi", `${name} · Pemilik: ${owner}`, "success");
+  }
+
+  function toggleManualCoordinatePanel() {
+    if (!state.maker.identityConfirmed) {
+      showToast("Konfirmasi identitas terlebih dahulu", "Isi identitas lahan lalu tekan Confirm.", "warning");
+      el("makerName").focus();
+      return;
+    }
+
+    const panel = el("manualCoordinatePanel");
+    const shouldOpen = panel.hidden;
+    panel.hidden = !shouldOpen;
+    el("manualCoordinateBtn").setAttribute("aria-expanded", String(shouldOpen));
+    setInlineMessage("manualCoordinateMessage", "", "", true);
+
+    if (shouldOpen) {
+      window.setTimeout(() => el("manualCoordinatesInput").focus(), 40);
+    }
+  }
+
+  function closeManualCoordinatePanel(clearInput) {
+    el("manualCoordinatePanel").hidden = true;
+    el("manualCoordinateBtn").setAttribute("aria-expanded", "false");
+    setInlineMessage("manualCoordinateMessage", "", "", true);
+    if (clearInput) el("manualCoordinatesInput").value = "";
+  }
+
+  function addManualCoordinates() {
+    if (!state.maker.identityConfirmed) return;
+
+    const input = el("manualCoordinatesInput");
+    const order = el("manualCoordinateOrder").value;
+    const lines = input.value
+      .split(/\r?\n/)
+      .map((line, index) => ({ text: line.trim(), number: index + 1 }))
+      .filter((line) => line.text);
+
+    if (!lines.length) {
+      setInlineMessage(
+        "manualCoordinateMessage",
+        "Belum ada koordinat. Paste minimal satu baris latitude dan longitude.",
+        "error",
+        false
+      );
+      input.focus();
+      return;
+    }
+
+    const parsedPoints = [];
+    const errors = [];
+    const numberPattern = /[-+]?(?:\d+(?:\.\d*)?|\.\d+)/g;
+
+    lines.forEach((line) => {
+      const matches = line.text.match(numberPattern) || [];
+      if (matches.length !== 2) {
+        errors.push(`Baris ${line.number}: harus berisi tepat dua angka koordinat.`);
+        return;
+      }
+
+      const first = Number(matches[0]);
+      const second = Number(matches[1]);
+      const lat = order === "lnglat" ? second : first;
+      const lng = order === "lnglat" ? first : second;
+
+      if (!Number.isFinite(lat) || !Number.isFinite(lng)) {
+        errors.push(`Baris ${line.number}: koordinat bukan angka yang valid.`);
+        return;
+      }
+      if (lat < -90 || lat > 90) {
+        errors.push(`Baris ${line.number}: latitude harus antara -90 dan 90.`);
+        return;
+      }
+      if (lng < -180 || lng > 180) {
+        errors.push(`Baris ${line.number}: longitude harus antara -180 dan 180.`);
+        return;
+      }
+
+      parsedPoints.push({
+        lat: roundCoordinate(lat),
+        lng: roundCoordinate(lng),
+        accuracy: null,
+        source: "manual",
+        capturedAt: new Date().toISOString()
+      });
+    });
+
+    if (errors.length) {
+      const shown = errors.slice(0, 8);
+      const remainder = errors.length > shown.length ? `\n• …dan ${errors.length - shown.length} kesalahan lain.` : "";
+      setInlineMessage(
+        "manualCoordinateMessage",
+        `Koordinat belum ditambahkan:\n• ${shown.join("\n• ")}${remainder}`,
+        "error",
+        false
+      );
+      return;
+    }
+
+    state.maker.points.push(...parsedPoints);
+    closeManualCoordinatePanel(true);
+    renderMaker(true);
+    showToast(
+      "Koordinat manual ditambahkan",
+      `${parsedPoints.length} titik baru dimasukkan ke Capture Log.`,
+      "success"
+    );
   }
 
   async function loadBsreLayer() {
@@ -338,6 +479,12 @@
 
   function takeGpsPoint() {
     if (state.maker.isLocating) return;
+    if (!state.maker.identityConfirmed) {
+      showToast("Konfirmasi identitas terlebih dahulu", "Isi identitas lahan lalu tekan Confirm.", "warning");
+      el("makerIdentityPanel").hidden = false;
+      el("makerName").focus();
+      return;
+    }
 
     if (!("geolocation" in navigator)) {
       setGpsStatus("error", "Geolocation tidak tersedia", "Browser ini tidak mendukung Location API.");
@@ -357,6 +504,7 @@
           accuracy: Number.isFinite(position.coords.accuracy)
             ? Math.round(position.coords.accuracy * 10) / 10
             : null,
+          source: "gps",
           capturedAt: new Date().toISOString()
         };
 
@@ -412,11 +560,16 @@
     } else {
       points.forEach((point, index) => {
         const row = document.createElement("tr");
+        const accuracyDisplay = point.source === "manual"
+          ? '<span class="manual-source-badge">Manual</span>'
+          : point.accuracy === null
+            ? "—"
+            : `±${formatNumber(point.accuracy, 1)} m`;
         row.innerHTML = `
           <td><span class="point-number">${index + 1}</span></td>
           <td>${point.lat.toFixed(7)}</td>
           <td>${point.lng.toFixed(7)}</td>
-          <td>${point.accuracy === null ? "—" : `±${formatNumber(point.accuracy, 1)} m`}</td>
+          <td>${accuracyDisplay}</td>
           <td>
             <button class="delete-point" type="button" data-index="${index}" aria-label="Hapus titik ${index + 1}" title="Hapus titik">
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 7h16M9 7V4h6v3M7 7l1 13h8l1-13M10 11v5M14 11v5"/></svg>
@@ -473,23 +626,28 @@
     const perimeter = polygonReady ? calculatePerimeter(state.maker.points) : 0;
     const name = el("makerName").value.trim();
     const owner = el("makerOwner").value.trim();
+    const identityConfirmed = state.maker.identityConfirmed;
     const filename = `${strictSlug(name || "nama_lahan")}.geojson`;
     const bsreSuffix = state.maker.bsreLayer ? " · BSRE aktif" : "";
 
     el("makerFileHint").textContent = filename;
+    el("confirmIdentityBtn").disabled = !name || !owner || state.maker.isLocating;
+    el("manualCoordinateBtn").disabled = !identityConfirmed || state.maker.isLocating;
     el("pointCount").textContent = String(pointCount);
     el("pointCountBadge").textContent = String(pointCount);
     el("areaM2").textContent = polygonReady ? formatNumber(area, area < 100 ? 2 : 0) : "—";
     el("areaHa").textContent = polygonReady ? formatNumber(area / 10000, 4) : "—";
     el("perimeter").textContent = polygonReady ? formatNumber(perimeter, 1) : "—";
-    el("resetMakerBtn").disabled = pointCount === 0 || state.maker.isLocating;
-    el("takePointBtn").disabled = state.maker.isLocating;
-    el("downloadMakerBtn").disabled = !polygonReady || !name || !owner || state.maker.isLocating;
+    el("resetMakerBtn").disabled = (pointCount === 0 && !identityConfirmed) || state.maker.isLocating;
+    el("takePointBtn").disabled = state.maker.isLocating || !identityConfirmed;
+    el("downloadMakerBtn").disabled = !identityConfirmed || !polygonReady || !name || !owner || state.maker.isLocating;
 
     const message = el("makerMessage");
     message.className = "inline-alert inline-alert-info";
-    if (pointCount === 0) {
-      message.textContent = "Minimal 3 titik diperlukan untuk membentuk polygon.";
+    if (!identityConfirmed) {
+      message.textContent = "Isi nama lahan dan nama pemilik, lalu tekan Confirm untuk memulai pengambilan titik.";
+    } else if (pointCount === 0) {
+      message.textContent = "Identitas telah dikonfirmasi. Minimal 3 titik diperlukan untuk membentuk polygon.";
     } else if (pointCount < 3) {
       message.textContent = `${3 - pointCount} titik lagi diperlukan. Garis saat ini masih berupa preview terbuka.`;
     } else if (!name || !owner) {
@@ -499,30 +657,39 @@
       message.textContent = `Polygon siap — ${pointCount} titik, luas ${formatNumber(area, 2)} m² (${formatNumber(area / 10000, 4)} ha).`;
     }
 
-    el("makerMapCaption").textContent = polygonReady
-      ? `Polygon tertutup otomatis · ${pointCount} titik · ${formatNumber(area / 10000, 4)} ha${bsreSuffix}`
-      : pointCount
-        ? `Preview garis aktif · ${pointCount} dari minimal 3 titik${bsreSuffix}`
-        : state.maker.bsreLayer
-          ? "Polygon BSRE aktif · warna sky blue"
-          : "Ambil titik pertama untuk mulai menggambar batas.";
+    el("makerMapCaption").textContent = !identityConfirmed
+      ? `Konfirmasi identitas lahan untuk memulai${bsreSuffix}`
+      : polygonReady
+        ? `Polygon tertutup otomatis · ${pointCount} titik · ${formatNumber(area / 10000, 4)} ha${bsreSuffix}`
+        : pointCount
+          ? `Preview garis aktif · ${pointCount} dari minimal 3 titik${bsreSuffix}`
+          : state.maker.bsreLayer
+            ? "Polygon BSRE aktif · warna sky blue"
+            : "Ambil titik pertama untuk mulai menggambar batas.";
   }
 
   function resetMaker() {
-    if (state.maker.points.length && !window.confirm("Hapus seluruh titik yang sudah direkam?")) return;
+    if (state.maker.points.length && !window.confirm("Hapus seluruh titik dan buka kembali Identitas Lahan?")) return;
     state.maker.points = [];
-    setGpsStatus("", "Siap mengambil lokasi", "Aktifkan izin lokasi pada browser Anda.");
+    state.maker.identityConfirmed = false;
+    closeManualCoordinatePanel(true);
+    el("makerIdentityPanel").hidden = false;
+    setGpsStatus("", "Menunggu konfirmasi identitas", "Periksa identitas lahan, lalu tekan Confirm.");
     renderMaker(false);
     if (state.maker.bsreLayer) {
       fitLeafletLayer(state.maker.map, state.maker.bsreLayer, 17);
     } else {
       state.maker.map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
     }
+    window.setTimeout(() => {
+      state.maker.map.invalidateSize({ pan: false });
+      el("makerName").focus();
+    }, 80);
     showToast(
       "Maker direset",
       state.maker.bsreLayer
-        ? "Seluruh titik GPS telah dihapus; layer BSRE tetap ditampilkan."
-        : "Seluruh titik GPS telah dihapus.",
+        ? "Titik GPS dihapus, Identitas Lahan dibuka kembali, dan layer BSRE tetap ditampilkan."
+        : "Titik GPS dihapus dan Identitas Lahan dibuka kembali.",
       "warning"
     );
   }

@@ -7,6 +7,10 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, dan mengganti nama file
 ### Maker
 - Mengambil titik dengan `navigator.geolocation.getCurrentPosition()` dan `enableHighAccuracy: true`.
 - Menyimpan identitas nama lahan dan nama pemilik lahan.
+- Tombol **Confirm** mengunci identitas dan menyembunyikan panelnya agar layar fokus pada peta serta pengambilan titik.
+- Tombol **Reset** menghapus titik dan membuka kembali panel Identitas Lahan untuk diperiksa atau diubah.
+- Tombol **Manual Coordinate** pada Capture Log menerima satu atau banyak baris koordinat decimal degrees melalui paste.
+- Mendukung urutan `Latitude, Longitude` maupun `Longitude, Latitude`, dengan pemisah koma, titik koma, spasi, atau tab.
 - Marker, garis sementara, dan preview polygon hijau terang langsung di Leaflet.
 - Tombol **Load BSRE** untuk menampilkan referensi polygon BSRE berwarna sky blue.
 - Titik dapat dihapus satu per satu.

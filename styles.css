@@ -331,6 +331,22 @@ main { min-height: calc(100vh - var(--header-h)); }
 .button-secondary:hover:not(:disabled) { border-color: var(--ink); background: var(--surface-2); }
 .button-dark { color: #fff; background: var(--ink); border-color: var(--ink); }
 .button-dark:hover:not(:disabled) { background: var(--red); border-color: var(--red); }
+.button-confirm {
+  min-height: 58px;
+  justify-content: space-between;
+  margin-top: 20px;
+  padding: 11px 16px;
+  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+  text-align: left;
+  box-shadow: inset 0 -3px 0 var(--red);
+}
+.button-confirm:hover:not(:disabled) { background: var(--red); border-color: var(--red); }
+.button-confirm span { display: flex; flex-direction: column; gap: 4px; }
+.button-confirm small { color: #999; font: 700 7px/1 ui-monospace, monospace; letter-spacing: .14em; }
+.button-confirm:hover:not(:disabled) small { color: rgba(255,255,255,.72); }
+.button-confirm svg { width: 22px; height: 22px; }
 .button-bsre {
   color: #0369a1;
   background: #f0f9ff;
@@ -446,6 +462,52 @@ main { min-height: calc(100vh - var(--header-h)); }
 .data-table tbody tr:not(.empty-row):hover { background: #f7f7f7; }
 .empty-row td { height: 70px; color: var(--muted); text-align: center; font-family: inherit; }
 .point-number { display: inline-grid; width: 21px; height: 21px; place-items: center; color: #fff; background: var(--ink); font-size: 8px; font-weight: 800; }
+.capture-log-head { flex-wrap: wrap; }
+.capture-log-actions { display: flex; align-items: center; justify-content: flex-end; gap: 8px; }
+.manual-coordinate-button {
+  min-height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  padding: 7px 10px;
+  color: #fff;
+  background: var(--ink);
+  border: 1px solid var(--ink);
+  font-size: 8px;
+  font-weight: 800;
+  letter-spacing: .045em;
+  text-transform: uppercase;
+  transition: color .16s, background .16s, border-color .16s, opacity .16s;
+}
+.manual-coordinate-button svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 2; }
+.manual-coordinate-button:hover:not(:disabled), .manual-coordinate-button[aria-expanded="true"] { background: var(--red); border-color: var(--red); }
+.manual-coordinate-button:focus-visible { outline: 3px solid rgba(230,0,18,.2); outline-offset: 2px; }
+.manual-coordinate-button:disabled { cursor: not-allowed; opacity: .35; }
+.manual-coordinate-panel { background: #f7f7f7; border-bottom: 1px solid var(--line); }
+.manual-coordinate-head {
+  min-height: 52px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  padding: 10px 16px;
+  color: #fff;
+  background: var(--ink);
+  border-left: 4px solid var(--red);
+}
+.manual-coordinate-head > div { display: flex; flex-direction: column; gap: 4px; }
+.manual-coordinate-head span { color: #777; font: 700 7px/1 ui-monospace, monospace; letter-spacing: .14em; }
+.manual-coordinate-head strong { font-size: 11px; letter-spacing: .03em; }
+.manual-close-button { width: 30px; height: 30px; padding: 0; color: #aaa; background: transparent; border: 1px solid #3e3e3e; font-size: 20px; line-height: 1; }
+.manual-close-button:hover { color: #fff; border-color: var(--red); background: var(--red); }
+.manual-coordinate-body { padding: 17px; }
+.manual-coordinate-body .field-label:not(:first-child) { margin-top: 14px; }
+.manual-order-select { min-height: 40px; padding-top: 7px; padding-bottom: 7px; font-size: 10px; }
+.manual-coordinate-textarea { min-height: 138px; resize: vertical; font: 11px/1.65 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+.manual-coordinate-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.manual-coordinate-actions .button { min-width: 115px; }
+.manual-source-badge { display: inline-flex; align-items: center; padding: 4px 6px; color: #075985; background: #e0f2fe; border: 1px solid #7dd3fc; font: 800 7px/1 ui-monospace, monospace; text-transform: uppercase; }
 .delete-point, .delete-property {
   width: 30px;
   height: 30px;
@@ -815,6 +877,7 @@ main { min-height: calc(100vh - var(--header-h)); }
   .section-heading h1 { font-size: 29px; }
   .panel-head { padding-right: 16px; padding-left: 16px; }
   .panel-body { padding: 17px 16px; }
+  .manual-coordinate-actions .button { min-width: 0; flex: 1; }
   .stats-panel { grid-template-columns: 1fr 1fr; }
   .metric strong { font-size: 17px; }
   .map { height: 370px; }

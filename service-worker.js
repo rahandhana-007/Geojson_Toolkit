@@ -1,5 +1,5 @@
 const CACHE_PREFIX = "geojson-toolkit-";
-const CACHE_NAME = `${CACHE_PREFIX}v1`;
+const CACHE_NAME = `${CACHE_PREFIX}v3`;
 const INDEX_URL = new URL("./index.html", self.location.href).href;
 
 const APP_SHELL = [

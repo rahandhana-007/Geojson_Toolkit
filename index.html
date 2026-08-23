@@ -73,7 +73,7 @@
 
       <div class="maker-layout">
         <div class="control-column">
-          <article class="panel">
+          <article class="panel identity-panel" id="makerIdentityPanel">
             <div class="panel-head">
               <div>
                 <p class="panel-kicker">PROJECT SETUP</p>
@@ -92,6 +92,13 @@
                 <input class="text-input" id="makerOwner" type="text" maxlength="120" placeholder="Contoh: Ahmad Siregar" autocomplete="name">
                 <p class="field-hint">Disimpan pada properties GeoJSON sebagai <code>nama_pemilik</code>.</p>
               </div>
+              <button class="button button-confirm button-full" id="confirmIdentityBtn" type="button" disabled>
+                <span>
+                  <small>LOCK PROJECT IDENTITY</small>
+                  Confirm
+                </span>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m5 12 4 4L19 6"/></svg>
+              </button>
             </div>
           </article>
 
@@ -107,8 +114,8 @@
               <div class="gps-status" id="gpsStatus" role="status" aria-live="polite">
                 <span class="gps-crosshair" aria-hidden="true"></span>
                 <div>
-                  <strong>Siap mengambil lokasi</strong>
-                  <small>Aktifkan izin lokasi pada browser Anda.</small>
+                  <strong>Menunggu konfirmasi identitas</strong>
+                  <small>Isi nama lahan dan pemilik, lalu tekan Confirm.</small>
                 </div>
               </div>
               <div class="button-row maker-button-row">
@@ -154,12 +161,45 @@
           </article>
 
           <article class="panel point-panel">
-            <div class="panel-head compact">
+            <div class="panel-head compact capture-log-head">
               <div>
                 <p class="panel-kicker">CAPTURE LOG</p>
                 <h2>Daftar Titik</h2>
               </div>
-              <span class="count-badge" id="pointCountBadge">0</span>
+              <div class="capture-log-actions">
+                <span class="count-badge" id="pointCountBadge">0</span>
+                <button class="manual-coordinate-button" id="manualCoordinateBtn" type="button" aria-expanded="false" aria-controls="manualCoordinatePanel" disabled>
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                  Manual Coordinate
+                </button>
+              </div>
+            </div>
+            <div class="manual-coordinate-panel" id="manualCoordinatePanel" hidden>
+              <div class="manual-coordinate-head">
+                <div>
+                  <span>MANUAL INPUT</span>
+                  <strong>Paste Koordinat</strong>
+                </div>
+                <button class="manual-close-button" id="closeManualCoordinateBtn" type="button" aria-label="Tutup input koordinat manual">×</button>
+              </div>
+              <div class="manual-coordinate-body">
+                <label class="field-label" for="manualCoordinateOrder">Urutan angka per baris</label>
+                <select class="text-input manual-order-select" id="manualCoordinateOrder">
+                  <option value="latlng">Latitude, Longitude</option>
+                  <option value="lnglat">Longitude, Latitude</option>
+                </select>
+                <label class="field-label" for="manualCoordinatesInput">Koordinat decimal degrees</label>
+                <textarea class="text-input manual-coordinate-textarea" id="manualCoordinatesInput" rows="6" spellcheck="false" placeholder="3.595200, 98.672200&#10;3.595850, 98.673100&#10;3.596400, 98.672500"></textarea>
+                <p class="field-hint">Satu titik per baris. Pemisah dapat berupa koma, titik koma, spasi, atau tab. Gunakan titik untuk angka desimal.</p>
+                <div class="inline-alert" id="manualCoordinateMessage" hidden role="alert"></div>
+                <div class="manual-coordinate-actions">
+                  <button class="button button-secondary" id="cancelManualCoordinateBtn" type="button">Batal</button>
+                  <button class="button button-primary" id="addManualCoordinatesBtn" type="button">
+                    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                    Tambahkan Titik
+                  </button>
+                </div>
+              </div>
             </div>
             <div class="table-wrap">
               <table class="data-table point-table">
