@@ -8,6 +8,8 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, dan mengganti nama file
 - Mengambil titik dengan `navigator.geolocation.getCurrentPosition()` dan `enableHighAccuracy: true`.
 - Menyimpan identitas nama lahan dan nama pemilik lahan.
 - Tombol **Confirm** mengunci identitas dan menyembunyikan panelnya agar layar fokus pada peta serta pengambilan titik.
+- Tombol **My Location** muncul sebelum titik pertama untuk memusatkan peta ke posisi pengguna tanpa memasukkannya ke Capture Log.
+- Posisi dari My Location baru tersimpan ketika pengguna menekan **Ambil Titik**; tombol tersebut otomatis hilang setelah titik pertama tersedia.
 - Tombol **Reset** menghapus titik dan membuka kembali panel Identitas Lahan untuk diperiksa atau diubah.
 - Tombol **Manual Coordinate** pada Capture Log menerima satu atau banyak baris koordinat decimal degrees melalui paste.
 - Mendukung urutan `Latitude, Longitude` maupun `Longitude, Latitude`, dengan pemisah koma, titik koma, spasi, atau tab.

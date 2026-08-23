@@ -14,6 +14,7 @@
       points: [],
       map: null,
       layerGroup: null,
+      myLocationLayer: null,
       bsreLayer: null,
       bsreLoading: false,
       identityConfirmed: false,
@@ -249,6 +250,7 @@
     el("makerName").addEventListener("input", updateMakerAvailability);
     el("makerOwner").addEventListener("input", updateMakerAvailability);
     el("confirmIdentityBtn").addEventListener("click", confirmMakerIdentity);
+    el("myLocationBtn").addEventListener("click", findMyLocation);
     el("takePointBtn").addEventListener("click", takeGpsPoint);
     el("loadBsreBtn").addEventListener("click", loadBsreLayer);
     el("resetMakerBtn").addEventListener("click", resetMaker);
@@ -396,6 +398,7 @@
       return;
     }
 
+    clearMyLocationPreview();
     state.maker.points.push(...parsedPoints);
     closeManualCoordinatePanel(true);
     renderMaker(true);
@@ -477,6 +480,108 @@
     }
   }
 
+  function findMyLocation() {
+    if (state.maker.isLocating) return;
+    if (!state.maker.identityConfirmed) {
+      showToast("Konfirmasi identitas terlebih dahulu", "Isi identitas lahan lalu tekan Confirm.", "warning");
+      return;
+    }
+    if (state.maker.points.length) {
+      showToast("Pengambilan titik sudah dimulai", "My Location hanya tersedia sebelum titik pertama ditambahkan.", "warning");
+      return;
+    }
+    if (!("geolocation" in navigator)) {
+      setGpsStatus("error", "Geolocation tidak tersedia", "Browser ini tidak mendukung Location API.");
+      showToast("GPS tidak tersedia", "Gunakan browser modern dengan dukungan geolocation.", "error");
+      return;
+    }
+
+    const button = el("myLocationBtn");
+    state.maker.isLocating = true;
+    button.classList.add("is-loading");
+    button.querySelector("strong").textContent = "Mencari Lokasi…";
+    setGpsStatus("loading", "Mencari lokasi Anda…", "Posisi ini hanya untuk memusatkan peta dan belum disimpan sebagai titik.");
+    updateMakerAvailability();
+
+    navigator.geolocation.getCurrentPosition(
+      (position) => {
+        const lat = roundCoordinate(position.coords.latitude);
+        const lng = roundCoordinate(position.coords.longitude);
+        const accuracy = Number.isFinite(position.coords.accuracy)
+          ? Math.max(1, Math.round(position.coords.accuracy * 10) / 10)
+          : null;
+
+        clearMyLocationPreview();
+        const group = L.featureGroup();
+        if (accuracy !== null) {
+          L.circle([lat, lng], {
+            radius: accuracy,
+            color: "#38bdf8",
+            weight: 1.5,
+            opacity: 0.9,
+            fillColor: "#7dd3fc",
+            fillOpacity: 0.14,
+            interactive: false
+          }).addTo(group);
+        }
+        L.circleMarker([lat, lng], {
+          radius: 9,
+          color: "#ffffff",
+          weight: 3,
+          fillColor: "#0284c7",
+          fillOpacity: 1
+        })
+          .bindPopup(`<div class="map-popup"><strong>Lokasi Anda</strong><code>${lat.toFixed(7)}<br>${lng.toFixed(7)}</code><br><small>Belum disimpan sebagai titik</small></div>`)
+          .addTo(group);
+
+        state.maker.myLocationLayer = group.addTo(state.maker.map);
+        state.maker.isLocating = false;
+        button.classList.remove("is-loading");
+        button.classList.add("is-active");
+        button.querySelector("strong").textContent = "Lokasi Ditemukan";
+        fitLeafletLayer(state.maker.map, group, 19);
+        setGpsStatus(
+          "success",
+          "Lokasi Anda ditemukan",
+          accuracy !== null
+            ? `Akurasi ±${formatNumber(accuracy, 1)} m. Tekan Ambil Titik untuk menyimpan koordinat.`
+            : "Tekan Ambil Titik untuk menyimpan koordinat."
+        );
+        updateMakerAvailability();
+        showToast("Peta dipusatkan ke lokasi Anda", "Lokasi belum masuk Capture Log. Tekan Ambil Titik untuk menyimpannya.", "success");
+      },
+      (error) => {
+        state.maker.isLocating = false;
+        button.classList.remove("is-loading");
+        button.querySelector("strong").textContent = state.maker.myLocationLayer ? "Lokasi Ditemukan" : "My Location";
+        const messages = {
+          1: ["Izin lokasi ditolak", "Izinkan akses lokasi pada pengaturan browser, lalu coba lagi."],
+          2: ["Posisi tidak tersedia", "Sinyal GPS belum tersedia. Pindah ke area terbuka dan coba lagi."],
+          3: ["Pencarian lokasi timeout", "GPS terlalu lama merespons. Coba sekali lagi."]
+        };
+        const [title, detail] = messages[error.code] || ["Gagal mencari lokasi", error.message || "Terjadi kesalahan geolocation."];
+        setGpsStatus("error", title, detail);
+        updateMakerAvailability();
+        showToast(title, detail, "error");
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 0
+      }
+    );
+  }
+
+  function clearMyLocationPreview() {
+    if (state.maker.myLocationLayer) {
+      state.maker.map.removeLayer(state.maker.myLocationLayer);
+      state.maker.myLocationLayer = null;
+    }
+    const button = el("myLocationBtn");
+    button.classList.remove("is-active", "is-loading");
+    button.querySelector("strong").textContent = "My Location";
+  }
+
   function takeGpsPoint() {
     if (state.maker.isLocating) return;
     if (!state.maker.identityConfirmed) {
@@ -508,6 +613,7 @@
           capturedAt: new Date().toISOString()
         };
 
+        clearMyLocationPreview();
         state.maker.points.push(point);
         state.maker.isLocating = false;
         setGpsStatus(
@@ -633,6 +739,8 @@
     el("makerFileHint").textContent = filename;
     el("confirmIdentityBtn").disabled = !name || !owner || state.maker.isLocating;
     el("manualCoordinateBtn").disabled = !identityConfirmed || state.maker.isLocating;
+    el("myLocationAction").hidden = !identityConfirmed || pointCount > 0;
+    el("myLocationBtn").disabled = !identityConfirmed || pointCount > 0 || state.maker.isLocating;
     el("pointCount").textContent = String(pointCount);
     el("pointCountBadge").textContent = String(pointCount);
     el("areaM2").textContent = polygonReady ? formatNumber(area, area < 100 ? 2 : 0) : "—";
@@ -647,7 +755,7 @@
     if (!identityConfirmed) {
       message.textContent = "Isi nama lahan dan nama pemilik, lalu tekan Confirm untuk memulai pengambilan titik.";
     } else if (pointCount === 0) {
-      message.textContent = "Identitas telah dikonfirmasi. Minimal 3 titik diperlukan untuk membentuk polygon.";
+      message.textContent = "Gunakan My Location untuk memusatkan peta, lalu ambil minimal 3 titik untuk membentuk polygon.";
     } else if (pointCount < 3) {
       message.textContent = `${3 - pointCount} titik lagi diperlukan. Garis saat ini masih berupa preview terbuka.`;
     } else if (!name || !owner) {
@@ -663,15 +771,18 @@
         ? `Polygon tertutup otomatis · ${pointCount} titik · ${formatNumber(area / 10000, 4)} ha${bsreSuffix}`
         : pointCount
           ? `Preview garis aktif · ${pointCount} dari minimal 3 titik${bsreSuffix}`
-          : state.maker.bsreLayer
-            ? "Polygon BSRE aktif · warna sky blue"
-            : "Ambil titik pertama untuk mulai menggambar batas.";
+          : state.maker.myLocationLayer
+            ? "Lokasi Anda ditampilkan · belum disimpan ke Capture Log"
+            : state.maker.bsreLayer
+              ? "Polygon BSRE aktif · warna sky blue"
+              : "Gunakan My Location atau ambil titik pertama untuk memulai.";
   }
 
   function resetMaker() {
     if (state.maker.points.length && !window.confirm("Hapus seluruh titik dan buka kembali Identitas Lahan?")) return;
     state.maker.points = [];
     state.maker.identityConfirmed = false;
+    clearMyLocationPreview();
     closeManualCoordinatePanel(true);
     el("makerIdentityPanel").hidden = false;
     setGpsStatus("", "Menunggu konfirmasi identitas", "Periksa identitas lahan, lalu tekan Confirm.");

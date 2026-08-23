@@ -447,6 +447,24 @@ main { min-height: calc(100vh - var(--header-h)); }
 .gps-crosshair::after { width: 36px; height: 1px; top: 13px; left: -5px; }
 .gps-crosshair { animation: crosshair-pulse 2.3s ease-in-out infinite; }
 @keyframes crosshair-pulse { 50% { transform: scale(.94); opacity: .72; } }
+.pre-capture-location { margin-bottom: 10px; }
+.button-location {
+  min-height: 57px;
+  justify-content: flex-start;
+  padding: 10px 14px;
+  color: #fff;
+  background: var(--ink);
+  border-color: var(--ink);
+  box-shadow: inset 4px 0 0 #38bdf8;
+}
+.button-location:hover:not(:disabled) { color: #fff; background: #202020; border-color: #38bdf8; }
+.button-location.is-active { background: #075985; border-color: #38bdf8; box-shadow: inset 4px 0 0 #7dd3fc; }
+.button-location > svg { width: 22px; height: 22px; color: #38bdf8; }
+.button-location.is-loading > svg { animation: crosshair-pulse .8s ease-in-out infinite; }
+.button-location > span { flex: 1; display: flex; flex-direction: column; align-items: flex-start; gap: 4px; text-align: left; }
+.button-location small { color: #818181; font: 700 7px/1 ui-monospace, monospace; letter-spacing: .1em; }
+.button-location.is-active small { color: #bae6fd; }
+.button-location > i { color: #38bdf8; font-style: normal; font-size: 18px; }
 .stats-panel { display: grid; grid-template-columns: repeat(2, 1fr); }
 .metric { position: relative; min-width: 0; padding: 16px 17px; border-right: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .metric:nth-child(even) { border-right: 0; }
