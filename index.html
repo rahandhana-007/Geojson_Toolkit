@@ -1,0 +1,442 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#111111">
+  <meta name="description" content="GeoJSON Toolkit untuk membuat, membaca, mengedit, dan mengganti nama file GeoJSON langsung di browser.">
+  <meta name="application-name" content="GeoJSON Toolkit">
+  <meta name="mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="GeoJSON Toolkit">
+  <title>GeoJSON Toolkit — By AR</title>
+  <link rel="manifest" href="manifest.webmanifest">
+  <link rel="icon" href="assets/favicon.svg" type="image/svg+xml">
+  <link rel="apple-touch-icon" href="assets/icons/apple-touch-icon.png">
+  <link rel="stylesheet" href="vendor/leaflet.css">
+  <link rel="stylesheet" href="styles.css">
+  <script defer src="vendor/leaflet.js"></script>
+  <script defer src="app.js"></script>
+</head>
+<body>
+  <noscript>
+    <div class="noscript">Aplikasi ini membutuhkan JavaScript. Aktifkan JavaScript lalu muat ulang halaman.</div>
+  </noscript>
+
+  <header class="topbar">
+    <a class="brand" href="#maker" aria-label="GeoJSON Toolkit by AR — Beranda">
+      <span class="brand-mark" aria-hidden="true"><b>AR</b></span>
+      <span class="brand-copy">
+        <strong>GeoJSON Toolkit — By AR</strong>
+        <small>FIELD DATA UTILITY</small>
+      </span>
+    </a>
+
+    <nav class="main-nav" aria-label="Fitur utama" role="tablist">
+      <button class="nav-item is-active" id="tab-maker" type="button" role="tab" aria-selected="true" aria-controls="maker" data-tab="maker">
+        <span>01</span> Maker
+      </button>
+      <button class="nav-item" id="tab-reader" type="button" role="tab" aria-selected="false" aria-controls="reader" data-tab="reader">
+        <span>02</span> Reader
+      </button>
+      <button class="nav-item" id="tab-renamer" type="button" role="tab" aria-selected="false" aria-controls="renamer" data-tab="renamer">
+        <span>03</span> Renamer
+      </button>
+    </nav>
+
+    <div class="topbar-actions">
+      <button class="install-button" id="installAppBtn" type="button" hidden title="Install GeoJSON Toolkit di perangkat">
+        <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v11M7.5 10.5 12 15l4.5-4.5M5 19h14"/></svg>
+        <span>Install App</span>
+      </button>
+      <div class="local-badge" title="Semua data diproses hanya di browser">
+        <span class="pulse-dot" aria-hidden="true"></span>
+        CLIENT-SIDE
+      </div>
+    </div>
+  </header>
+
+  <main>
+    <!-- MAKER -->
+    <section class="workspace is-active" id="maker" role="tabpanel" aria-labelledby="tab-maker" tabindex="0">
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow"><span>01</span> FIELD CAPTURE</p>
+          <h1>Buat Polygon dari Titik GPS</h1>
+        </div>
+        <div class="section-state">
+          <span class="state-label">MODE</span>
+          <strong><i class="status-light"></i> GPS MAKER</strong>
+        </div>
+      </div>
+
+      <div class="maker-layout">
+        <div class="control-column">
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">PROJECT SETUP</p>
+                <h2>Identitas Lahan</h2>
+              </div>
+              <span class="step-tag">A</span>
+            </div>
+            <div class="panel-body">
+              <div class="form-field">
+                <label class="field-label" for="makerName">Nama Lahan <span aria-hidden="true">*</span></label>
+                <input class="text-input" id="makerName" type="text" maxlength="120" placeholder="Contoh: Kebun Blok Utara" autocomplete="off">
+                <p class="field-hint">File: <code id="makerFileHint">nama_lahan.geojson</code></p>
+              </div>
+              <div class="form-field">
+                <label class="field-label" for="makerOwner">Nama Pemilik Lahan <span aria-hidden="true">*</span></label>
+                <input class="text-input" id="makerOwner" type="text" maxlength="120" placeholder="Contoh: Ahmad Siregar" autocomplete="name">
+                <p class="field-hint">Disimpan pada properties GeoJSON sebagai <code>nama_pemilik</code>.</p>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">GPS ACQUISITION</p>
+                <h2>Pengambilan Titik</h2>
+              </div>
+              <span class="step-tag">B</span>
+            </div>
+            <div class="panel-body">
+              <div class="gps-status" id="gpsStatus" role="status" aria-live="polite">
+                <span class="gps-crosshair" aria-hidden="true"></span>
+                <div>
+                  <strong>Siap mengambil lokasi</strong>
+                  <small>Aktifkan izin lokasi pada browser Anda.</small>
+                </div>
+              </div>
+              <div class="button-row maker-button-row">
+                <button class="button button-primary button-grow" id="takePointBtn" type="button">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 8.5a3.5 3.5 0 1 0 0 7 3.5 3.5 0 0 0 0-7Z"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/></svg>
+                  Ambil Titik
+                </button>
+                <button class="button button-bsre" id="loadBsreBtn" type="button" aria-pressed="false" title="Tampilkan polygon BSRE">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4M4 17l8 4 8-4"/></svg>
+                  <span>Load BSRE</span>
+                </button>
+                <button class="button button-secondary" id="resetMakerBtn" type="button" disabled>
+                  Reset
+                </button>
+              </div>
+              <div class="inline-alert inline-alert-info" id="makerMessage">
+                Minimal 3 titik diperlukan untuk membentuk polygon.
+              </div>
+            </div>
+          </article>
+
+          <article class="panel stats-panel" aria-label="Statistik polygon">
+            <div class="metric">
+              <span>TITIK</span>
+              <strong id="pointCount">0</strong>
+              <small>koordinat</small>
+            </div>
+            <div class="metric">
+              <span>LUAS</span>
+              <strong id="areaM2">—</strong>
+              <small>meter persegi</small>
+            </div>
+            <div class="metric">
+              <span>HEKTAR</span>
+              <strong id="areaHa">—</strong>
+              <small>ha</small>
+            </div>
+            <div class="metric">
+              <span>PERIMETER</span>
+              <strong id="perimeter">—</strong>
+              <small>meter</small>
+            </div>
+          </article>
+
+          <article class="panel point-panel">
+            <div class="panel-head compact">
+              <div>
+                <p class="panel-kicker">CAPTURE LOG</p>
+                <h2>Daftar Titik</h2>
+              </div>
+              <span class="count-badge" id="pointCountBadge">0</span>
+            </div>
+            <div class="table-wrap">
+              <table class="data-table point-table">
+                <thead>
+                  <tr><th>#</th><th>Latitude</th><th>Longitude</th><th>Akurasi</th><th aria-label="Aksi"></th></tr>
+                </thead>
+                <tbody id="pointTableBody">
+                  <tr class="empty-row"><td colspan="5">Belum ada titik yang direkam.</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </article>
+
+          <button class="button button-download button-full" id="downloadMakerBtn" type="button" disabled>
+            <span>
+              <small>EXPORT DATA</small>
+              Download GeoJSON
+            </span>
+            <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+          </button>
+        </div>
+
+        <article class="map-panel maker-map-panel">
+          <div class="map-toolbar">
+            <div>
+              <span class="map-index">MAP / 01</span>
+              <strong>LIVE BOUNDARY PREVIEW</strong>
+            </div>
+            <div class="map-legend" aria-label="Legenda peta">
+              <span><i class="legend-dot"></i> Titik</span>
+              <span><i class="legend-line"></i> Batas</span>
+              <span><i class="legend-line legend-line-bsre"></i> BSRE</span>
+            </div>
+          </div>
+          <div class="map" id="makerMap" aria-label="Peta titik dan polygon Maker"></div>
+          <div class="map-caption">
+            <span>OPENSTREETMAP</span>
+            <p id="makerMapCaption">Ambil titik pertama untuk mulai menggambar batas.</p>
+          </div>
+        </article>
+      </div>
+    </section>
+
+    <!-- READER -->
+    <section class="workspace" id="reader" role="tabpanel" aria-labelledby="tab-reader" tabindex="0" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow"><span>02</span> DATA INSPECTION</p>
+          <h1>Baca &amp; Edit GeoJSON</h1>
+        </div>
+        <div class="section-state">
+          <span class="state-label">MODE</span>
+          <strong><i class="status-light"></i> FILE READER</strong>
+        </div>
+      </div>
+
+      <div class="upload-zone" id="readerDropZone" tabindex="0" role="button" aria-label="Upload GeoJSON dengan klik atau tarik dan lepas">
+        <input id="readerFileInput" type="file" accept=".geojson,.json,application/geo+json,application/json" hidden>
+        <div class="upload-icon" aria-hidden="true">
+          <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 14v5h14v-5"/></svg>
+        </div>
+        <div class="upload-copy">
+          <strong>DROP GEOJSON FILE HERE</strong>
+          <p>Tarik &amp; lepas file <code>.geojson</code> atau <code>.json</code></p>
+        </div>
+        <button class="button button-dark browse-button" type="button">Pilih File</button>
+      </div>
+      <div class="inline-alert" id="readerUploadMessage" hidden role="alert"></div>
+
+      <div class="reader-layout" id="readerWorkspace" hidden>
+        <div class="reader-sidebar">
+          <article class="panel file-summary-panel">
+            <div class="file-summary">
+              <div class="file-symbol" aria-hidden="true">{ }</div>
+              <div class="file-summary-copy">
+                <small>ACTIVE FILE</small>
+                <strong id="readerOriginalName">—</strong>
+                <span id="readerFileMeta">—</span>
+              </div>
+              <button class="icon-button" id="readerReplaceBtn" type="button" title="Ganti file" aria-label="Ganti file">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M20 11a8 8 0 1 0-2.3 5.7M20 4v7h-7"/></svg>
+              </button>
+            </div>
+            <div class="geometry-chips" id="readerGeometryChips"></div>
+          </article>
+
+          <article class="panel feature-panel">
+            <div class="panel-head compact">
+              <div>
+                <p class="panel-kicker">FEATURE INDEX</p>
+                <h2>Pilih Feature</h2>
+              </div>
+              <span class="count-badge" id="readerFeatureCount">0</span>
+            </div>
+            <div class="feature-list" id="readerFeatureList"></div>
+          </article>
+        </div>
+
+        <div class="reader-main">
+          <article class="map-panel reader-map-panel">
+            <div class="map-toolbar reader-map-toolbar">
+              <div>
+                <span class="map-index">MAP / 02</span>
+                <strong>GEOMETRY INSPECTOR</strong>
+              </div>
+              <div class="reader-map-actions">
+                <span class="selection-badge" id="readerMapSelection">ALL FEATURES</span>
+                <button class="map-tool-button compare-button" id="readerCompareBtn" type="button" aria-pressed="false" title="Tampilkan file BSRE sebagai overlay sky blue">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4"/></svg>
+                  <span>Compare</span>
+                </button>
+                <button class="map-tool-button hide-bsre-button" id="readerHideBsreBtn" type="button" disabled title="Sembunyikan overlay BSRE">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M3 3l18 18M10.6 10.7a2 2 0 0 0 2.7 2.7M9.9 4.2A10.8 10.8 0 0 1 12 4c5.5 0 9 5 9 5a17 17 0 0 1-2.1 2.5M6.6 6.6C4.3 8.1 3 10 3 10s3.5 5 9 5c1 0 1.9-.2 2.7-.5"/></svg>
+                  <span>Hidden BSRE</span>
+                </button>
+              </div>
+            </div>
+            <div class="map reader-map" id="readerMap" aria-label="Peta geometry GeoJSON Reader"></div>
+          </article>
+
+          <article class="panel property-panel">
+            <div class="panel-head property-head">
+              <div>
+                <p class="panel-kicker">PARAMETER EDITOR</p>
+                <h2 id="propertyEditorTitle">Properties</h2>
+              </div>
+              <div class="edit-state" id="readerEditState"><i></i> TERSIMPAN</div>
+            </div>
+            <div class="property-column-labels" aria-hidden="true">
+              <span>KEY</span><span>TYPE</span><span>VALUE</span><span></span>
+            </div>
+            <div class="property-editor" id="propertyEditor"></div>
+            <div class="property-actions">
+              <button class="button button-secondary" id="addPropertyBtn" type="button">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg>
+                Tambah Properti
+              </button>
+              <button class="button button-primary" id="savePropertiesBtn" type="button">
+                Simpan Perubahan
+              </button>
+            </div>
+            <div class="inline-alert" id="readerEditorMessage" hidden role="alert"></div>
+          </article>
+
+          <article class="panel export-panel">
+            <div>
+              <p class="panel-kicker">EXPORT RESULT</p>
+              <h2>Download Hasil Edit</h2>
+              <p>File dihasilkan dari data yang tersimpan di memory browser.</p>
+            </div>
+            <div class="export-controls">
+              <div class="filename-control">
+                <label for="readerDownloadName">Nama file</label>
+                <input class="text-input" id="readerDownloadName" type="text" autocomplete="off">
+              </div>
+              <button class="button button-download" id="downloadReaderBtn" type="button">
+                <span><small>EXPORT</small>Download</span>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+              </button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- RENAMER -->
+    <section class="workspace" id="renamer" role="tabpanel" aria-labelledby="tab-renamer" tabindex="0" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow"><span>03</span> FILE CONTROL</p>
+          <h1>Rename File / Layer GeoJSON</h1>
+        </div>
+        <div class="section-state">
+          <span class="state-label">MODE</span>
+          <strong><i class="status-light"></i> FILE RENAMER</strong>
+        </div>
+      </div>
+
+      <div class="renamer-shell">
+        <div class="upload-zone upload-zone-compact" id="renamerDropZone" tabindex="0" role="button" aria-label="Upload file untuk diganti nama">
+          <input id="renamerFileInput" type="file" accept=".geojson,.json,application/geo+json,application/json" hidden>
+          <div class="upload-icon" aria-hidden="true">
+            <svg viewBox="0 0 24 24"><path d="M12 16V4M7 9l5-5 5 5M5 14v5h14v-5"/></svg>
+          </div>
+          <div class="upload-copy">
+            <strong>UPLOAD SOURCE FILE</strong>
+            <p>Drop GeoJSON atau pilih dari perangkat</p>
+          </div>
+          <button class="button button-dark browse-button" type="button">Pilih File</button>
+        </div>
+        <div class="inline-alert" id="renamerUploadMessage" hidden role="alert"></div>
+
+        <div class="renamer-grid" id="renamerWorkspace" hidden>
+          <article class="panel renamer-file-card">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">SOURCE FILE</p>
+                <h2>File Asal</h2>
+              </div>
+              <span class="valid-badge"><i></i> VALID</span>
+            </div>
+            <div class="source-file-display">
+              <div class="document-icon" aria-hidden="true"><span>GEO</span><b>{ }</b></div>
+              <div>
+                <strong id="renamerOriginalName">—</strong>
+                <p id="renamerFileMeta">—</p>
+              </div>
+            </div>
+            <dl class="file-facts">
+              <div><dt>Root type</dt><dd id="renamerRootType">—</dd></div>
+              <div><dt>Features</dt><dd id="renamerFeatureCount">—</dd></div>
+              <div><dt>Geometry</dt><dd id="renamerGeometryTypes">—</dd></div>
+            </dl>
+            <button class="text-button" id="renamerReplaceBtn" type="button">Ganti file sumber →</button>
+          </article>
+
+          <article class="panel rename-card">
+            <div class="panel-head">
+              <div>
+                <p class="panel-kicker">RENAME CONTROL</p>
+                <h2>Nama Baru</h2>
+              </div>
+              <span class="step-tag">03</span>
+            </div>
+            <div class="panel-body rename-body">
+              <label class="field-label" for="renamerNewName">Nama lahan / file baru <span aria-hidden="true">*</span></label>
+              <div class="filename-builder">
+                <input class="text-input" id="renamerNewName" type="text" maxlength="120" placeholder="Contoh: Kebun Blok Selatan" autocomplete="off">
+                <span>.geojson</span>
+              </div>
+              <p class="field-hint">Hasil: <code id="renamerFileHint">nama_baru.geojson</code></p>
+
+              <div class="divider"></div>
+
+              <label class="switch-row" for="renamerSyncProperties">
+                <span class="switch">
+                  <input id="renamerSyncProperties" type="checkbox">
+                  <i aria-hidden="true"></i>
+                </span>
+                <span>
+                  <strong>Sinkronkan properties internal</strong>
+                  <small>Ubah nilai field terpilih agar konsisten dengan nama baru.</small>
+                </span>
+              </label>
+
+              <div class="sync-options" id="renamerSyncOptions" aria-disabled="true">
+                <p class="option-label">FIELD YANG DIPERBARUI</p>
+                <label class="check-option"><input type="checkbox" name="renameField" value="nama_lahan" checked> <span>nama_lahan</span></label>
+                <label class="check-option"><input type="checkbox" name="renameField" value="name" checked> <span>name</span></label>
+                <label class="field-label custom-field-label" for="renamerCustomField">Field lain (opsional)</label>
+                <input class="text-input small-input" id="renamerCustomField" type="text" placeholder="contoh: layer_name" autocomplete="off">
+                <label class="check-option create-option"><input type="checkbox" id="renamerCreateMissing"> <span>Buat field jika belum ada</span></label>
+              </div>
+
+              <div class="rename-preview">
+                <span>OUTPUT PREVIEW</span>
+                <div><b id="renameFromPreview">source.geojson</b><i aria-hidden="true">→</i><strong id="renameToPreview">nama_baru.geojson</strong></div>
+                <small id="renameSyncPreview">Isi GeoJSON tidak diubah.</small>
+              </div>
+
+              <button class="button button-download button-full" id="downloadRenamerBtn" type="button" disabled>
+                <span><small>EXPORT RENAMED FILE</small>Download</span>
+                <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
+              </button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div><span class="footer-mark">AR</span><strong>GeoJSON Toolkit — By AR</strong></div>
+    <p>Data tetap berada di perangkat Anda. Peta © OpenStreetMap contributors.</p>
+    <span>CLIENT-SIDE UTILITY / 2026</span>
+  </footer>
+
+  <div class="toast-region" id="toastRegion" aria-live="polite" aria-atomic="true"></div>
+</body>
+</html>
