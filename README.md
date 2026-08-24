@@ -13,6 +13,8 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, dan mengganti nama file
 - Setelah titik GPS pertama direkam, **Live Trail** otomatis memantau pergerakan menggunakan `watchPosition`.
 - Jejak aktual ditampilkan sebagai garis titik oranye, lengkap dengan marker panah arah, lingkaran akurasi, jarak tempuh, dan bearing.
 - Live Trail dapat dijeda/dilanjutkan dan dibersihkan otomatis saat Reset atau ketika seluruh titik dihapus.
+- Indikator kualitas GPS diperbarui secara live: **Sangat Akurat** (≤5 m), **Akurat** (>5–10 m), **Kurang Akurat** (>10–25 m), dan **Bad Signal** (>25 m atau tidak ada GPS fix).
+- Klasifikasi akurasi juga ditampilkan pada setiap titik GPS di Capture Log.
 - Tombol **Reset** menghapus titik dan membuka kembali panel Identitas Lahan untuk diperiksa atau diubah.
 - Tombol **Manual Coordinate** pada Capture Log menerima satu atau banyak baris koordinat decimal degrees melalui paste.
 - Mendukung urutan `Latitude, Longitude` maupun `Longitude, Latitude`, dengan pemisah koma, titik koma, spasi, atau tab.

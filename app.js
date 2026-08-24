@@ -505,6 +505,7 @@
     }
     if (!("geolocation" in navigator)) {
       setGpsStatus("error", "Geolocation tidak tersedia", "Browser ini tidak mendukung Location API.");
+      updateGpsQuality(null);
       showToast("GPS tidak tersedia", "Gunakan browser modern dengan dukungan geolocation.", "error");
       return;
     }
@@ -513,6 +514,7 @@
     state.maker.isLocating = true;
     button.classList.add("is-loading");
     button.querySelector("strong").textContent = "Mencari Lokasi…";
+    setGpsQualityPending();
     setGpsStatus("loading", "Mencari lokasi Anda…", "Posisi ini hanya untuk memusatkan peta dan belum disimpan sebagai titik.");
     updateMakerAvailability();
 
@@ -553,12 +555,13 @@
         button.classList.add("is-active");
         button.querySelector("strong").textContent = "Lokasi Ditemukan";
         fitLeafletLayer(state.maker.map, group, 19);
+        const quality = updateGpsQuality(accuracy);
         setGpsStatus(
           "success",
           "Lokasi Anda ditemukan",
           accuracy !== null
-            ? `Akurasi ±${formatNumber(accuracy, 1)} m. Tekan Ambil Titik untuk menyimpan koordinat.`
-            : "Tekan Ambil Titik untuk menyimpan koordinat."
+            ? `Akurasi ±${formatNumber(accuracy, 1)} m · ${quality.label}. Tekan Ambil Titik untuk menyimpan koordinat.`
+            : `${quality.label}. Tekan Ambil Titik untuk menyimpan koordinat.`
         );
         updateMakerAvailability();
         showToast("Peta dipusatkan ke lokasi Anda", "Lokasi belum masuk Capture Log. Tekan Ambil Titik untuk menyimpannya.", "success");
@@ -573,6 +576,7 @@
           3: ["Pencarian lokasi timeout", "GPS terlalu lama merespons. Coba sekali lagi."]
         };
         const [title, detail] = messages[error.code] || ["Gagal mencari lokasi", error.message || "Terjadi kesalahan geolocation."];
+        updateGpsQuality(null);
         setGpsStatus("error", title, detail);
         updateMakerAvailability();
         showToast(title, detail, "error");
@@ -644,6 +648,7 @@
         recordMakerTrailPosition(current, accuracy, false);
       },
       (error) => {
+        updateGpsQuality(null);
         if (error.code === 1) {
           pauseMakerTrail();
           el("trailStatusText").textContent = "Izin lokasi dicabut · trail dijeda";
@@ -690,6 +695,7 @@
 
     updateTrailDirectionMarker(point);
     updateTrailAccuracy(point, accuracy);
+    if (accuracy !== null) updateGpsQuality(accuracy);
     updateTrailStatus(state.maker.trailDistance + tailDistance);
     state.maker.map.panInside([point.lat, point.lng], {
       paddingTopLeft: [55, 75],
@@ -820,12 +826,14 @@
 
     if (!("geolocation" in navigator)) {
       setGpsStatus("error", "Geolocation tidak tersedia", "Browser ini tidak mendukung Location API.");
+      updateGpsQuality(null);
       showToast("GPS tidak tersedia", "Gunakan browser modern dengan dukungan geolocation.", "error");
       return;
     }
 
     state.maker.isLocating = true;
     el("takePointBtn").disabled = true;
+    setGpsQualityPending();
     setGpsStatus("loading", "Mencari posisi akurat…", "Tetap diam beberapa detik di titik pengukuran.");
 
     navigator.geolocation.getCurrentPosition(
@@ -843,12 +851,13 @@
         clearMyLocationPreview();
         state.maker.points.push(point);
         state.maker.isLocating = false;
+        const quality = updateGpsQuality(point.accuracy);
         setGpsStatus(
           "success",
           `Titik ${state.maker.points.length} berhasil direkam`,
           point.accuracy !== null
-            ? `Akurasi perangkat ±${formatNumber(point.accuracy, 1)} m.`
-            : "Akurasi perangkat tidak tersedia."
+            ? `Akurasi perangkat ±${formatNumber(point.accuracy, 1)} m · ${quality.label}.`
+            : `${quality.label} · akurasi perangkat tidak tersedia.`
         );
         renderMaker(true);
         startOrExtendMakerTrail(point);
@@ -862,6 +871,7 @@
           3: ["Pencarian lokasi timeout", "GPS terlalu lama merespons. Coba ambil titik sekali lagi."]
         };
         const [title, detail] = messages[error.code] || ["Gagal mengambil lokasi", error.message || "Terjadi kesalahan geolocation."];
+        updateGpsQuality(null);
         setGpsStatus("error", title, detail);
         updateMakerAvailability();
         showToast(title, detail, "error");
@@ -881,6 +891,39 @@
     status.querySelector("small").textContent = detail;
   }
 
+  function classifyGpsAccuracy(accuracy) {
+    if (!Number.isFinite(accuracy)) return { key: "bad", label: "Bad Signal" };
+    if (accuracy <= 5) return { key: "very", label: "Sangat Akurat" };
+    if (accuracy <= 10) return { key: "good", label: "Akurat" };
+    if (accuracy <= 25) return { key: "low", label: "Kurang Akurat" };
+    return { key: "bad", label: "Bad Signal" };
+  }
+
+  function updateGpsQuality(accuracy) {
+    const panel = el("gpsQualityPanel");
+    const quality = classifyGpsAccuracy(accuracy);
+    panel.dataset.quality = quality.key;
+    el("gpsQualityLabel").textContent = quality.label;
+    el("gpsAccuracyValue").textContent = Number.isFinite(accuracy)
+      ? `±${formatNumber(accuracy, 1)} m`
+      : "NO FIX";
+    return quality;
+  }
+
+  function setGpsQualityPending() {
+    const panel = el("gpsQualityPanel");
+    panel.removeAttribute("data-quality");
+    el("gpsQualityLabel").textContent = "Mengukur sinyal…";
+    el("gpsAccuracyValue").textContent = "…";
+  }
+
+  function resetGpsQuality() {
+    const panel = el("gpsQualityPanel");
+    panel.removeAttribute("data-quality");
+    el("gpsQualityLabel").textContent = "Menunggu GPS";
+    el("gpsAccuracyValue").textContent = "—";
+  }
+
   function renderMaker(refitMap = false) {
     const points = state.maker.points;
     const body = el("pointTableBody");
@@ -894,11 +937,10 @@
     } else {
       points.forEach((point, index) => {
         const row = document.createElement("tr");
+        const pointQuality = classifyGpsAccuracy(point.accuracy);
         const accuracyDisplay = point.source === "manual"
           ? '<span class="manual-source-badge">Manual</span>'
-          : point.accuracy === null
-            ? "—"
-            : `±${formatNumber(point.accuracy, 1)} m`;
+          : `<span class="gps-accuracy-cell"><span>${point.accuracy === null ? "—" : `±${formatNumber(point.accuracy, 1)} m`}</span><b class="gps-quality-badge quality-${pointQuality.key}">${pointQuality.label}</b></span>`;
         row.innerHTML = `
           <td><span class="point-number">${index + 1}</span></td>
           <td>${point.lat.toFixed(7)}</td>
@@ -967,6 +1009,7 @@
     el("makerFileHint").textContent = filename;
     el("confirmIdentityBtn").disabled = !name || !owner || state.maker.isLocating;
     el("manualCoordinateBtn").disabled = !identityConfirmed || state.maker.isLocating;
+    el("gpsQualityPanel").hidden = !identityConfirmed;
     el("myLocationAction").hidden = !identityConfirmed || pointCount > 0;
     el("myLocationBtn").disabled = !identityConfirmed || pointCount > 0 || state.maker.isLocating;
     el("pointCount").textContent = String(pointCount);
@@ -1015,6 +1058,7 @@
     closeManualCoordinatePanel(true);
     el("makerIdentityPanel").hidden = false;
     setGpsStatus("", "Menunggu konfirmasi identitas", "Periksa identitas lahan, lalu tekan Confirm.");
+    resetGpsQuality();
     renderMaker(false);
     if (state.maker.bsreLayer) {
       fitLeafletLayer(state.maker.map, state.maker.bsreLayer, 17);

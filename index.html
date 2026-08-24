@@ -118,6 +118,27 @@
                   <small>Isi nama lahan dan pemilik, lalu tekan Confirm.</small>
                 </div>
               </div>
+              <div class="gps-quality-panel" id="gpsQualityPanel" hidden aria-live="polite">
+                <div class="gps-quality-current">
+                  <div>
+                    <span>GPS ACCURACY</span>
+                    <strong id="gpsQualityLabel">Menunggu GPS</strong>
+                  </div>
+                  <b id="gpsAccuracyValue">—</b>
+                </div>
+                <div class="gps-quality-scale" aria-hidden="true">
+                  <i data-quality="very"></i>
+                  <i data-quality="good"></i>
+                  <i data-quality="low"></i>
+                  <i data-quality="bad"></i>
+                </div>
+                <div class="gps-quality-ranges">
+                  <span><i class="quality-dot quality-very"></i><b>Sangat Akurat</b><small>≤ 5 m</small></span>
+                  <span><i class="quality-dot quality-good"></i><b>Akurat</b><small>&gt; 5–10 m</small></span>
+                  <span><i class="quality-dot quality-low"></i><b>Kurang Akurat</b><small>&gt; 10–25 m</small></span>
+                  <span><i class="quality-dot quality-bad"></i><b>Bad Signal</b><small>&gt; 25 m</small></span>
+                </div>
+              </div>
               <div class="trail-status" id="trailStatus" hidden>
                 <span class="trail-live-dot" aria-hidden="true"></span>
                 <div>
