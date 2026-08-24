@@ -15,6 +15,14 @@
       map: null,
       layerGroup: null,
       myLocationLayer: null,
+      trailWatchId: null,
+      trailPositions: [],
+      trailPath: null,
+      trailMarker: null,
+      trailAccuracyLayer: null,
+      trailDistance: 0,
+      trailBearing: 0,
+      trailPaused: false,
       bsreLayer: null,
       bsreLoading: false,
       identityConfirmed: false,
@@ -206,6 +214,9 @@
     const bsrePane = state.maker.map.createPane("bsrePane");
     bsrePane.style.zIndex = "350";
     bsrePane.style.pointerEvents = "none";
+    const trailPane = state.maker.map.createPane("trailPane");
+    trailPane.style.zIndex = "450";
+    trailPane.style.pointerEvents = "none";
     state.maker.layerGroup = L.featureGroup().addTo(state.maker.map);
     state.reader.map = createMap("readerMap");
     const readerBsrePane = state.reader.map.createPane("readerBsrePane");
@@ -251,6 +262,7 @@
     el("makerOwner").addEventListener("input", updateMakerAvailability);
     el("confirmIdentityBtn").addEventListener("click", confirmMakerIdentity);
     el("myLocationBtn").addEventListener("click", findMyLocation);
+    el("trailToggleBtn").addEventListener("click", toggleMakerTrail);
     el("takePointBtn").addEventListener("click", takeGpsPoint);
     el("loadBsreBtn").addEventListener("click", loadBsreLayer);
     el("resetMakerBtn").addEventListener("click", resetMaker);
@@ -272,6 +284,7 @@
       const index = Number(button.dataset.index);
       if (!Number.isInteger(index)) return;
       state.maker.points.splice(index, 1);
+      if (!state.maker.points.length) stopMakerTrail(true);
       renderMaker(true);
       showToast("Titik dihapus", `Titik ${index + 1} telah dikeluarkan dari polygon.`, "warning");
     });
@@ -582,6 +595,220 @@
     button.querySelector("strong").textContent = "My Location";
   }
 
+  function startOrExtendMakerTrail(point) {
+    if (state.maker.trailPath) {
+      recordMakerTrailPosition(point, point.accuracy ?? null, true);
+      return;
+    }
+
+    if (typeof navigator.geolocation?.watchPosition !== "function") {
+      showToast("Live Trail tidak tersedia", "Browser ini tidak mendukung pemantauan posisi berkelanjutan.", "warning");
+      return;
+    }
+
+    state.maker.trailPositions = [{ lat: point.lat, lng: point.lng }];
+    state.maker.trailDistance = 0;
+    state.maker.trailBearing = 0;
+    state.maker.trailPaused = false;
+    state.maker.trailPath = L.polyline([[point.lat, point.lng]], {
+      pane: "trailPane",
+      color: "#f59e0b",
+      weight: 3.5,
+      opacity: 0.95,
+      dashArray: "2 9",
+      lineCap: "round",
+      lineJoin: "round",
+      interactive: false
+    }).addTo(state.maker.map);
+
+    updateTrailDirectionMarker(point);
+    updateTrailAccuracy(point, point.accuracy ?? null);
+    el("trailStatus").hidden = false;
+    beginTrailWatch();
+    updateTrailStatus();
+    showToast("Live Trail aktif", "Garis titik akan mengikuti pergerakan menuju titik berikutnya.", "success");
+  }
+
+  function beginTrailWatch() {
+    if (state.maker.trailWatchId !== null || !state.maker.trailPath) return;
+    state.maker.trailPaused = false;
+    state.maker.trailWatchId = navigator.geolocation.watchPosition(
+      (position) => {
+        const current = {
+          lat: roundCoordinate(position.coords.latitude),
+          lng: roundCoordinate(position.coords.longitude)
+        };
+        const accuracy = Number.isFinite(position.coords.accuracy)
+          ? Math.max(1, Math.round(position.coords.accuracy * 10) / 10)
+          : null;
+        recordMakerTrailPosition(current, accuracy, false);
+      },
+      (error) => {
+        if (error.code === 1) {
+          pauseMakerTrail();
+          el("trailStatusText").textContent = "Izin lokasi dicabut · trail dijeda";
+          showToast("Live Trail dijeda", "Izin pemantauan lokasi tidak tersedia.", "warning");
+        } else {
+          el("trailStatusText").textContent = "Menunggu sinyal GPS berikutnya…";
+        }
+      },
+      {
+        enableHighAccuracy: true,
+        timeout: 20000,
+        maximumAge: 1000
+      }
+    );
+  }
+
+  function recordMakerTrailPosition(point, accuracy, forceCommit) {
+    if (!state.maker.trailPath) return;
+    const positions = state.maker.trailPositions;
+    const previous = positions[positions.length - 1];
+    const distance = previous ? haversineDistance(previous, point) : 0;
+
+    if (previous && distance >= 0.8) {
+      state.maker.trailBearing = calculateBearing(previous, point);
+    }
+
+    if (!previous) {
+      positions.push({ lat: point.lat, lng: point.lng });
+    } else if (distance >= 1.5 || (forceCommit && distance >= 0.2)) {
+      positions.push({ lat: point.lat, lng: point.lng });
+      state.maker.trailDistance += distance;
+    }
+
+    if (positions.length > 5000) {
+      state.maker.trailPositions = positions.filter((_item, index) => index === 0 || index === positions.length - 1 || index % 2 === 0);
+    }
+
+    const committed = state.maker.trailPositions;
+    const lastCommitted = committed[committed.length - 1];
+    const tailDistance = lastCommitted ? haversineDistance(lastCommitted, point) : 0;
+    const displayPositions = committed.map((item) => [item.lat, item.lng]);
+    if (tailDistance >= 0.2) displayPositions.push([point.lat, point.lng]);
+    state.maker.trailPath.setLatLngs(displayPositions);
+
+    updateTrailDirectionMarker(point);
+    updateTrailAccuracy(point, accuracy);
+    updateTrailStatus(state.maker.trailDistance + tailDistance);
+    state.maker.map.panInside([point.lat, point.lng], {
+      paddingTopLeft: [55, 75],
+      paddingBottomRight: [55, 75],
+      animate: true
+    });
+  }
+
+  function updateTrailDirectionMarker(point) {
+    const bearing = Math.round(state.maker.trailBearing * 10) / 10;
+    const icon = L.divIcon({
+      className: "trail-direction-icon",
+      html: `<span style="transform:rotate(${bearing}deg)"><svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 2 20 21l-8-4-8 4L12 2Z"/></svg></span>`,
+      iconSize: [34, 34],
+      iconAnchor: [17, 17]
+    });
+
+    if (state.maker.trailMarker) {
+      state.maker.trailMarker.setLatLng([point.lat, point.lng]).setIcon(icon);
+    } else {
+      state.maker.trailMarker = L.marker([point.lat, point.lng], {
+        icon,
+        interactive: false,
+        keyboard: false,
+        zIndexOffset: 800
+      }).addTo(state.maker.map);
+    }
+  }
+
+  function updateTrailAccuracy(point, accuracy) {
+    if (accuracy === null) return;
+    if (state.maker.trailAccuracyLayer) {
+      state.maker.trailAccuracyLayer.setLatLng([point.lat, point.lng]).setRadius(accuracy);
+    } else {
+      state.maker.trailAccuracyLayer = L.circle([point.lat, point.lng], {
+        pane: "trailPane",
+        radius: accuracy,
+        color: "#f59e0b",
+        weight: 1,
+        opacity: 0.45,
+        fillColor: "#fbbf24",
+        fillOpacity: 0.06,
+        interactive: false
+      }).addTo(state.maker.map);
+    }
+  }
+
+  function calculateBearing(from, to) {
+    const lat1 = toRadians(from.lat);
+    const lat2 = toRadians(to.lat);
+    const deltaLng = toRadians(to.lng - from.lng);
+    const y = Math.sin(deltaLng) * Math.cos(lat2);
+    const x = Math.cos(lat1) * Math.sin(lat2) - Math.sin(lat1) * Math.cos(lat2) * Math.cos(deltaLng);
+    return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+  }
+
+  function updateTrailStatus(distance = state.maker.trailDistance) {
+    if (!state.maker.trailPath) return;
+    const status = el("trailStatus");
+    status.hidden = false;
+    status.classList.toggle("is-paused", state.maker.trailPaused);
+    el("trailStatusText").textContent = state.maker.trailPaused
+      ? `Dijeda · ${formatTrailDistance(distance)}`
+      : `Aktif · ${formatTrailDistance(distance)} · arah ${Math.round(state.maker.trailBearing)}°`;
+
+    const button = el("trailToggleBtn");
+    button.querySelector("span").textContent = state.maker.trailPaused ? "Resume" : "Pause";
+    button.querySelector("svg").innerHTML = state.maker.trailPaused
+      ? '<path d="m7 4 12 8-12 8V4Z"/>'
+      : '<path d="M8 5v14M16 5v14"/>';
+  }
+
+  function formatTrailDistance(distance) {
+    return distance >= 1000
+      ? `${formatNumber(distance / 1000, 2)} km`
+      : `${formatNumber(distance, 1)} m`;
+  }
+
+  function toggleMakerTrail() {
+    if (!state.maker.trailPath) return;
+    if (state.maker.trailPaused) {
+      beginTrailWatch();
+      updateTrailStatus();
+      showToast("Live Trail dilanjutkan", "Pemantauan pergerakan GPS kembali aktif.", "success");
+    } else {
+      pauseMakerTrail();
+      showToast("Live Trail dijeda", "Jejak tetap terlihat dan dapat dilanjutkan kembali.", "warning");
+    }
+  }
+
+  function pauseMakerTrail() {
+    if (state.maker.trailWatchId !== null) {
+      navigator.geolocation.clearWatch(state.maker.trailWatchId);
+      state.maker.trailWatchId = null;
+    }
+    state.maker.trailPaused = true;
+    updateTrailStatus();
+  }
+
+  function stopMakerTrail(clearLayers) {
+    if (state.maker.trailWatchId !== null) {
+      navigator.geolocation.clearWatch(state.maker.trailWatchId);
+      state.maker.trailWatchId = null;
+    }
+    if (clearLayers) {
+      [state.maker.trailPath, state.maker.trailMarker, state.maker.trailAccuracyLayer].forEach((layer) => {
+        if (layer && state.maker.map.hasLayer(layer)) state.maker.map.removeLayer(layer);
+      });
+      state.maker.trailPath = null;
+      state.maker.trailMarker = null;
+      state.maker.trailAccuracyLayer = null;
+      state.maker.trailPositions = [];
+      state.maker.trailDistance = 0;
+      state.maker.trailBearing = 0;
+      state.maker.trailPaused = false;
+      el("trailStatus").hidden = true;
+    }
+  }
+
   function takeGpsPoint() {
     if (state.maker.isLocating) return;
     if (!state.maker.identityConfirmed) {
@@ -624,6 +851,7 @@
             : "Akurasi perangkat tidak tersedia."
         );
         renderMaker(true);
+        startOrExtendMakerTrail(point);
         showToast("Koordinat tersimpan", `${point.lat.toFixed(7)}, ${point.lng.toFixed(7)}`, "success");
       },
       (error) => {
@@ -783,6 +1011,7 @@
     state.maker.points = [];
     state.maker.identityConfirmed = false;
     clearMyLocationPreview();
+    stopMakerTrail(true);
     closeManualCoordinatePanel(true);
     el("makerIdentityPanel").hidden = false;
     setGpsStatus("", "Menunggu konfirmasi identitas", "Periksa identitas lahan, lalu tekan Confirm.");

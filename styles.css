@@ -447,6 +447,29 @@ main { min-height: calc(100vh - var(--header-h)); }
 .gps-crosshair::after { width: 36px; height: 1px; top: 13px; left: -5px; }
 .gps-crosshair { animation: crosshair-pulse 2.3s ease-in-out infinite; }
 @keyframes crosshair-pulse { 50% { transform: scale(.94); opacity: .72; } }
+.trail-status {
+  min-height: 50px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: -3px 0 10px;
+  padding: 8px 9px 8px 12px;
+  color: #fff;
+  background: #24201a;
+  border-left: 3px solid #f59e0b;
+}
+.trail-status.is-paused { color: #bbb; background: #292929; border-left-color: #777; }
+.trail-live-dot { width: 8px; height: 8px; flex: 0 0 auto; border-radius: 50%; background: #f59e0b; box-shadow: 0 0 0 4px rgba(245,158,11,.14); animation: trail-live-pulse 1.4s ease-in-out infinite; }
+.trail-status.is-paused .trail-live-dot { background: #777; box-shadow: none; animation: none; }
+@keyframes trail-live-pulse { 50% { opacity: .45; transform: scale(.82); } }
+.trail-status > div { min-width: 0; flex: 1; }
+.trail-status strong, .trail-status small { display: block; }
+.trail-status strong { margin-bottom: 4px; color: #fbbf24; font: 800 8px/1 ui-monospace, monospace; letter-spacing: .13em; }
+.trail-status.is-paused strong { color: #aaa; }
+.trail-status small { overflow: hidden; color: #b6b0a7; font-size: 8px; text-overflow: ellipsis; white-space: nowrap; }
+.trail-toggle-button { min-height: 31px; display: inline-flex; align-items: center; gap: 5px; padding: 6px 8px; color: #fbbf24; background: transparent; border: 1px solid #5e4b28; font-size: 8px; font-weight: 800; text-transform: uppercase; }
+.trail-toggle-button:hover { color: #111; background: #f59e0b; border-color: #f59e0b; }
+.trail-toggle-button svg { width: 13px; height: 13px; fill: none; stroke: currentColor; stroke-width: 2; }
 .pre-capture-location { margin-bottom: 10px; }
 .button-location {
   min-height: 57px;
@@ -557,6 +580,7 @@ main { min-height: calc(100vh - var(--header-h)); }
 .map-legend span { display: flex; align-items: center; gap: 6px; }
 .legend-dot { width: 8px; height: 8px; background: var(--red); border: 2px solid #fff; border-radius: 50%; }
 .legend-line { width: 18px; height: 2px; background: #72d64f; }
+.legend-trail { width: 20px; height: 3px; background: repeating-linear-gradient(90deg, #f59e0b 0 3px, transparent 3px 7px); }
 .legend-line-bsre { background: #38bdf8; }
 .map { width: 100%; height: 650px; background: #ddd; border: 8px solid var(--ink); border-top: 0; border-bottom: 0; }
 .map-caption { min-height: 47px; display: flex; align-items: center; justify-content: space-between; gap: 15px; padding: 10px 17px; color: #ccc; background: var(--ink); }
@@ -575,6 +599,10 @@ main { min-height: calc(100vh - var(--header-h)); }
   box-shadow: 0 2px 8px rgba(0,0,0,.36);
   font: 800 9px/1 ui-monospace, monospace;
 }
+.trail-direction-icon { background: transparent; border: 0; }
+.trail-direction-icon span { width: 34px; height: 34px; display: grid; place-items: center; filter: drop-shadow(0 2px 4px rgba(0,0,0,.38)); transform-origin: center; }
+.trail-direction-icon svg { width: 30px; height: 30px; overflow: visible; }
+.trail-direction-icon path { fill: #f59e0b; stroke: #fff; stroke-width: 1.8; stroke-linejoin: round; }
 
 /* Leaflet adjustments */
 .leaflet-container { font-family: inherit; }

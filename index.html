@@ -118,6 +118,17 @@
                   <small>Isi nama lahan dan pemilik, lalu tekan Confirm.</small>
                 </div>
               </div>
+              <div class="trail-status" id="trailStatus" hidden>
+                <span class="trail-live-dot" aria-hidden="true"></span>
+                <div>
+                  <strong>LIVE TRAIL</strong>
+                  <small id="trailStatusText">Menunggu pergerakan GPS…</small>
+                </div>
+                <button class="trail-toggle-button" id="trailToggleBtn" type="button">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M8 5v14M16 5v14"/></svg>
+                  <span>Pause</span>
+                </button>
+              </div>
               <div class="pre-capture-location" id="myLocationAction" hidden>
                 <button class="button button-location button-full" id="myLocationBtn" type="button">
                   <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 21s6-5.1 6-11a6 6 0 1 0-12 0c0 5.9 6 11 6 11Z"/><path d="M12 7.5a2.5 2.5 0 1 0 0 5 2.5 2.5 0 0 0 0-5Z"/></svg>
@@ -241,6 +252,7 @@
             <div class="map-legend" aria-label="Legenda peta">
               <span><i class="legend-dot"></i> Titik</span>
               <span><i class="legend-line"></i> Batas</span>
+              <span><i class="legend-trail"></i> Trail</span>
               <span><i class="legend-line legend-line-bsre"></i> BSRE</span>
             </div>
           </div>
