@@ -22,7 +22,7 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, dan mengganti nama file
 - Tombol **Load BSRE** untuk menampilkan referensi polygon BSRE berwarna sky blue.
 - Titik dapat dihapus satu per satu.
 - Menghitung luas geodesik (m²/ha) dan perimeter.
-- Export `FeatureCollection` / `Polygon` dengan properties `nama_lahan`, `nama_pemilik`, `luas_m2`, `luas_hektar`, `tanggal_pembuatan`, dan `jumlah_titik`.
+- Export `FeatureCollection` / `Polygon` dengan properties `nama_lahan`, `nama_pemilik`, `luas_hektar`, `tanggal_pembuatan`, dan `jumlah_titik`.
 
 ### Reader
 - Upload lewat drag-and-drop atau file picker.

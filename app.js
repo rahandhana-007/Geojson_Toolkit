@@ -1110,7 +1110,6 @@
           properties: {
             nama_lahan: name,
             nama_pemilik: owner,
-            luas_m2: Number(area.toFixed(2)),
             luas_hektar: Number((area / 10000).toFixed(4)),
             tanggal_pembuatan: new Date().toISOString(),
             jumlah_titik: points.length
