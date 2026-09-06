@@ -100,3 +100,10 @@ Leaflet disimpan lokal di folder `vendor`. Basemap memakai tile OpenStreetMap da
 ## Privasi
 
 File GeoJSON dan koordinat diproses di sisi client. Aplikasi ini tidak memiliki endpoint backend, analytics, atau mekanisme upload data.
+
+## Mode Offline
+Ketika perangkat tidak terhubung ke internet, aplikasi tetap bisa dipakai untuk input koordinat manual:
+- App shell (HTML/CSS/JS/Leaflet) di-cache oleh service worker dan dimuat dari cache saat offline.
+- Peta dasar OpenStreetMap tidak tersedia saat offline, sehingga aplikasi otomatis menggantinya dengan **grid koordinat (garis lintang/bujur)** agar titik & polygon tetap terlihat.
+- Indikator **OFFLINE · GRID MODE** muncul pada panel peta, dan tombol "Mode Offline · Grid" ditandai.
+- Input Koordinat Manual, penambahan titik, perhitungan luas, dan unduh GeoJSON semuanya berjalan tanpa koneksi.

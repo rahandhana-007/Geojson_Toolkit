@@ -230,14 +230,136 @@
       preferCanvas: true
     }).setView(DEFAULT_CENTER, DEFAULT_ZOOM);
 
-    L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
+    const gridPane = map.createPane("gridPane");
+    gridPane.style.zIndex = "250";
+    gridPane.style.pointerEvents = "none";
+
+    const tileLayer = L.tileLayer("https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png", {
       maxZoom: 20,
       attribution: "&copy; OpenStreetMap contributors"
     }).addTo(map);
 
     map.attributionControl.setPrefix(false);
     L.control.scale({ imperial: false, maxWidth: 120, position: "bottomleft" }).addTo(map);
+
+    attachOfflineHandling(map, tileLayer);
     return map;
+  }
+
+  /* Offline: swap the OSM basemap for a coordinate grid so Manual Coordinate
+     input stays usable without a network connection. */
+  function attachOfflineHandling(map, tileLayer) {
+    let graticule = null;
+    let offline = false;
+    let errorStreak = 0;
+    let lastErrorAt = 0;
+
+    const getGraticule = () => {
+      if (!graticule) graticule = createGraticule();
+      return graticule;
+    };
+
+    const setOffline = (value) => {
+      if (offline === value) return;
+      offline = value;
+      if (value) {
+        const layer = getGraticule();
+        if (!map.hasLayer(layer)) layer.addTo(map);
+        if (tileLayer) tileLayer.setOpacity(0);
+      } else {
+        if (graticule && map.hasLayer(graticule)) map.removeLayer(graticule);
+        if (tileLayer) tileLayer.setOpacity(1);
+      }
+      updateOfflinePanel(map, value);
+    };
+
+    // Successful tiles + a confirmed online state -> back to the normal basemap.
+    tileLayer.on("tileload", () => {
+      if (navigator.onLine) setOffline(false);
+    });
+    // A burst of tile errors (no network) -> switch to the grid basemap.
+    tileLayer.on("tileerror", () => {
+      const now = performance.now();
+      if (now - lastErrorAt > 2500) errorStreak = 0;
+      lastErrorAt = now;
+      errorStreak += 1;
+      if (errorStreak >= 2 && !offline) setOffline(true);
+    });
+
+    window.addEventListener("offline", () => setOffline(true));
+    window.addEventListener("online", () => setOffline(false));
+    setOffline(!navigator.onLine);
+  }
+
+  function updateOfflinePanel(map, value) {
+    const panel = map.getContainer().closest(".map-panel");
+    if (!panel) return;
+    panel.classList.toggle("is-offline", value);
+    const span = panel.querySelector(".map-caption span");
+    if (span) span.textContent = value ? "OFFLINE · GRID MODE" : "OPENSTREETMAP";
+  }
+
+  function niceStep(span) {
+    const steps = [0.0001, 0.0002, 0.0005, 0.001, 0.002, 0.005, 0.01, 0.02, 0.05, 0.1, 0.2, 0.5, 1, 2, 5, 10, 30, 45, 90];
+    for (const step of steps) {
+      if (span / step <= 7) return step;
+    }
+    return steps[steps.length - 1];
+  }
+
+  function gridLabel(value, interval) {
+    const decimals = interval >= 1 ? 0 : Math.min(6, Math.ceil(-Math.log10(interval)));
+    return `${value < 0 ? "-" : ""}${Math.abs(value).toFixed(decimals)}°`;
+  }
+
+  // A lightweight graticule (lat/lng grid) rendered as canvas tiles, dark-friendly.
+  function createGraticule() {
+    const Graticule = L.GridLayer.extend({
+      createTile(coords) {
+        const tile = document.createElement("canvas");
+        const size = this.getTileSize();
+        tile.width = size.x;
+        tile.height = size.y;
+        const ctx = tile.getContext("2d");
+        const z = coords.z;
+        const span = 360 / Math.pow(2, z);
+        const interval = niceStep(span);
+        const map = this._map;
+        const originX = coords.x * size.x;
+        const originY = coords.y * size.y;
+        const nw = this._tileCoordsToBounds(coords).getNorthWest();
+        const se = this._tileCoordsToBounds(coords).getSouthEast();
+
+        ctx.lineWidth = 1;
+        ctx.font = "10px ui-monospace, Menlo, monospace";
+        ctx.strokeStyle = "rgba(255,255,255,0.10)";
+        ctx.fillStyle = "rgba(255,255,255,0.32)";
+
+        const lngStart = Math.floor(nw.lng / interval) * interval;
+        for (let lng = lngStart; lng <= se.lng + 1e-9; lng += interval) {
+          const px = map.project([0, lng], z).x - originX;
+          if (px < -1 || px > size.x + 1) continue;
+          ctx.beginPath();
+          ctx.moveTo(px, 0);
+          ctx.lineTo(px, size.y);
+          ctx.stroke();
+          ctx.fillText(gridLabel(lng, interval), px + 4, 12);
+        }
+
+        const latStart = Math.floor(se.lat / interval) * interval;
+        for (let lat = latStart; lat <= nw.lat + 1e-9; lat += interval) {
+          const py = map.project([lat, 0], z).y - originY;
+          if (py < -1 || py > size.y + 1) continue;
+          ctx.beginPath();
+          ctx.moveTo(0, py);
+          ctx.lineTo(size.x, py);
+          ctx.stroke();
+          ctx.fillText(gridLabel(lat, interval), 4, py - 4);
+        }
+        return tile;
+      }
+    });
+    return new Graticule({ pane: "gridPane" });
   }
 
   function fitLeafletLayer(map, layer, maxZoom = 18) {
