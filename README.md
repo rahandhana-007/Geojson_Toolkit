@@ -107,3 +107,12 @@ Ketika perangkat tidak terhubung ke internet, aplikasi tetap bisa dipakai untuk 
 - Peta dasar OpenStreetMap tidak tersedia saat offline, sehingga aplikasi otomatis menggantinya dengan **grid koordinat (garis lintang/bujur)** agar titik & polygon tetap terlihat.
 - Indikator **OFFLINE · GRID MODE** muncul pada panel peta, dan tombol "Mode Offline · Grid" ditandai.
 - Input Koordinat Manual, penambahan titik, perhitungan luas, dan unduh GeoJSON semuanya berjalan tanpa koneksi.
+
+## Edit Polygon (Reader · dilindungi PIN)
+Fitur untuk mengubah bentuk geometry Polygon/MultiPolygon yang telah di-load di tab **Reader** dengan menyeret titik-titiknya.
+- Tombol **"Edit · Locked"** menampilkan dialog PIN. Masukkan PIN **`663322`** untuk membuka fitur.
+- Setelah terbuka, tombol **"Edit Polygon"** muncul. Klik untuk masuk mode edit: setiap sudut polygon diberi marker merah yang dapat diseret.
+- Saat menyeret, bentuk polygon diperbarui secara langsung; hasilnya tersimpan di memory browser (status menjadi "BELUM DISIMPAN").
+- Klik lagi **"Selesai Edit"** untuk keluar dan menyegarkan tampilan peta dari geometry terbaru.
+- Hanya geometry bertipe `Polygon` / `MultiPolygon` yang dapat diedit. Selama mode edit aktif, pemilihan feature lain dan ganti file dibatasi.
+- Unduh hasil edit via panel **Download Hasil Edit** setelah menyimpan perubahan.

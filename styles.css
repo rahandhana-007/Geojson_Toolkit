@@ -780,6 +780,14 @@ main { min-height: calc(100vh - var(--header-h)); }
   box-shadow: inset 0 -2px 0 #7dd3fc;
 }
 .hide-bsre-button:hover:not(:disabled) { background: #3c3c3c; }
+.map-tool-button[hidden] { display: none; }
+.edit-polygon-lock-button:hover:not(:disabled) { color: #fff; border-color: var(--red); }
+.edit-polygon-button.is-active {
+  color: #fff;
+  background: #e60012;
+  border-color: #ff5b68;
+  box-shadow: inset 0 -2px 0 #ff8a94;
+}
 .property-head { min-height: 82px; }
 .edit-state { display: flex; align-items: center; gap: 7px; color: var(--green); font: 800 8px/1 ui-monospace, monospace; letter-spacing: .1em; }
 .edit-state i { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
@@ -993,3 +1001,66 @@ main { min-height: calc(100vh - var(--header-h)); }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { scroll-behavior: auto !important; animation-duration: .01ms !important; animation-iteration-count: 1 !important; transition-duration: .01ms !important; }
 }
+
+/* PIN modal (Reader · Edit Polygon) */
+.pin-modal {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 20px;
+  background: rgba(0, 0, 0, .72);
+  -webkit-backdrop-filter: blur(3px);
+  backdrop-filter: blur(3px);
+}
+.pin-modal[hidden] { display: none; }
+.pin-modal-box {
+  position: relative;
+  width: min(360px, 100%);
+  padding: 26px 24px 24px;
+  color: var(--text, #eee);
+  background: #141414;
+  border: 1px solid #333;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, .55);
+}
+.pin-modal-box h2 { margin: 6px 0 4px; font-size: 20px; }
+.pin-hint { margin: 0 0 18px; color: #a9a9a9; font-size: 12px; line-height: 1.5; }
+.pin-input {
+  width: 100%;
+  font: 800 22px/1 ui-monospace, Menlo, monospace;
+  letter-spacing: .45em;
+  text-align: center;
+}
+.pin-close {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  width: 30px;
+  height: 30px;
+  display: grid;
+  place-items: center;
+  color: #888;
+  background: transparent;
+  border: 0;
+  font-size: 22px;
+  line-height: 1;
+  cursor: pointer;
+}
+.pin-close:hover { color: #fff; }
+.pin-actions { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-top: 18px; }
+.pin-modal-box .inline-alert { margin-top: 14px; }
+
+/* Edit Polygon vertex markers */
+.edit-vertex-icon { background: transparent; border: 0; }
+.edit-vertex-dot {
+  display: block;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: var(--red);
+  border: 2px solid #fff;
+  box-shadow: 0 0 0 3px rgba(230, 0, 18, .28);
+  cursor: grab;
+}
+.edit-vertex-dot:active { cursor: grabbing; }

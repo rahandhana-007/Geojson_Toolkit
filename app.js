@@ -5,6 +5,7 @@
   const DEFAULT_ZOOM = 13;
   const EARTH_RADIUS = 6371008.8;
   const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
+  const READER_EDIT_PIN = "663322";
 
   let deferredInstallPrompt = null;
 
@@ -38,7 +39,10 @@
       selectedLayer: null,
       bsreLayer: null,
       bsreLoading: false,
-      bsreVisible: false
+      bsreVisible: false,
+      editUnlocked: false,
+      editMode: false,
+      editState: null
     },
     renamer: {
       data: null,
@@ -1290,7 +1294,11 @@
   function setupReader() {
     setupDropZone("readerDropZone", "readerFileInput", loadReaderFile);
     el("readerReplaceBtn").addEventListener("click", () => {
-      if (state.reader.dirty && !window.confirm("Perubahan properties belum disimpan. Tetap ganti file?")) return;
+      if (state.reader.editMode) {
+        showToast("Selesaikan mode edit dulu", "Keluar dari mode Edit Polygon sebelum mengganti file.", "warning");
+        return;
+      }
+      if (state.reader.dirty && !window.confirm("Perubahan belum disimpan. Tetap ganti file?")) return;
       el("readerFileInput").click();
     });
     el("readerCompareBtn").addEventListener("click", showReaderBsreOverlay);
@@ -1329,6 +1337,24 @@
 
     el("savePropertiesBtn").addEventListener("click", () => saveReaderProperties(true));
     el("downloadReaderBtn").addEventListener("click", downloadReaderGeoJSON);
+
+    el("readerEditUnlockBtn").addEventListener("click", openPinModal);
+    el("readerEditPolygonBtn").addEventListener("click", toggleReaderEditMode);
+    el("pinConfirmBtn").addEventListener("click", submitPin);
+    el("pinCancelBtn").addEventListener("click", closePinModal);
+    el("pinCloseBtn").addEventListener("click", closePinModal);
+    el("pinInput").addEventListener("keydown", (event) => {
+      if (event.key === "Enter") {
+        event.preventDefault();
+        submitPin();
+      } else if (event.key === "Escape") {
+        closePinModal();
+      }
+    });
+    el("pinModal").addEventListener("click", (event) => {
+      if (event.target === el("pinModal")) closePinModal();
+    });
+
     updateReaderBsreControls();
   }
 
@@ -1515,6 +1541,11 @@
   function selectReaderFeature(index) {
     const features = getFeatures(state.reader.data);
     if (!Number.isInteger(index) || index < 0 || index >= features.length || index === state.reader.selectedIndex) return;
+
+    if (state.reader.editMode) {
+      showToast("Selesaikan mode edit dulu", "Keluar dari mode Edit Polygon sebelum memilih feature lain.", "warning");
+      return;
+    }
 
     if (state.reader.dirty && !window.confirm("Perubahan pada feature ini belum disimpan. Buang perubahan dan pindah feature?")) {
       return;
@@ -1772,7 +1803,7 @@
   function downloadReaderGeoJSON() {
     if (!state.reader.data) return;
     if (state.reader.dirty) {
-      setInlineMessage("readerEditorMessage", "Simpan perubahan properties sebelum mengunduh file.", "error", false);
+      setInlineMessage("readerEditorMessage", "Ada perubahan belum disimpan. Simpan perubahan sebelum mengunduh file.", "error", false);
       el("savePropertiesBtn").focus();
       showToast("Ada perubahan belum tersimpan", "Klik “Simpan Perubahan” terlebih dahulu.", "warning");
       return;
@@ -1783,6 +1814,229 @@
     const filename = ensureGeoJSONExtension(inputName || fallback);
     downloadJSON(state.reader.data, filename);
     showToast("File hasil edit dibuat", `${filename} berhasil diunduh.`, "success");
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Reader · Edit Polygon (PIN-gated)                                            */
+  /* -------------------------------------------------------------------------- */
+
+  function openPinModal() {
+    el("pinModal").hidden = false;
+    el("pinError").hidden = true;
+    el("pinError").textContent = "";
+    el("pinInput").value = "";
+    window.setTimeout(() => el("pinInput").focus(), 40);
+  }
+
+  function closePinModal() {
+    el("pinModal").hidden = true;
+    el("pinError").hidden = true;
+    el("pinError").textContent = "";
+    el("pinInput").value = "";
+  }
+
+  function submitPin() {
+    const value = el("pinInput").value.trim();
+    if (value !== READER_EDIT_PIN) {
+      el("pinError").hidden = false;
+      el("pinError").className = "inline-alert error";
+      el("pinError").textContent = "PIN salah. Coba lagi.";
+      el("pinInput").select();
+      return;
+    }
+    state.reader.editUnlocked = true;
+    el("readerEditUnlockBtn").hidden = true;
+    el("readerEditPolygonBtn").hidden = false;
+    closePinModal();
+    showToast("Edit Polygon dibuka", "Klik “Edit Polygon” untuk menyeret titik polygon.", "success");
+  }
+
+  function toggleReaderEditMode() {
+    if (!state.reader.editUnlocked) {
+      openPinModal();
+      return;
+    }
+    if (state.reader.editMode) {
+      stopReaderEditMode();
+    } else {
+      startReaderEditMode();
+    }
+  }
+
+  function readerEditTargetName() {
+    return `FEATURE ${String(state.reader.selectedIndex + 1).padStart(2, "0")} · EDIT`;
+  }
+
+  function startReaderEditMode() {
+    const features = getFeatures(state.reader.data);
+    const feature = features[state.reader.selectedIndex];
+    const geo = feature?.geometry;
+    if (!feature || !geo || !["Polygon", "MultiPolygon"].includes(geo.type)) {
+      showToast("Tidak dapat diedit", "Feature yang dipilih bukan Polygon/MultiPolygon.", "warning");
+      renderReaderSelection(false);
+      return;
+    }
+
+    // Clear the styled overlays; they get rebuilt from the (possibly new) data on exit.
+    const map = state.reader.map;
+    if (state.reader.allLayer) map.removeLayer(state.reader.allLayer);
+    if (state.reader.selectedLayer) map.removeLayer(state.reader.selectedLayer);
+    state.reader.allLayer = null;
+    state.reader.selectedLayer = null;
+
+    const edit = buildEditableGeometry(geo);
+    state.reader.editState = edit;
+    state.reader.editMode = true;
+
+    const button = el("readerEditPolygonBtn");
+    button.classList.add("is-active");
+    button.setAttribute("aria-pressed", "true");
+    button.querySelector(".edit-polygon-label").textContent = "Selesai Edit";
+    button.title = "Seret titik untuk mengubah bentuk; klik lagi untuk selesai.";
+
+    el("readerMapSelection").textContent = readerEditTargetName();
+    fitEditableGeometry(map, edit);
+  }
+
+  function stopReaderEditMode() {
+    if (!state.reader.editMode) return;
+    const map = state.reader.map;
+    const edit = state.reader.editState;
+    if (edit) {
+      (edit.polys || []).forEach((poly) => {
+        if (map.hasLayer(poly.layer)) map.removeLayer(poly.layer);
+      });
+      (edit.markers || []).forEach((entry) => {
+        if (map.hasLayer(entry.marker)) map.removeLayer(entry.marker);
+      });
+    }
+    state.reader.editState = null;
+    state.reader.editMode = false;
+
+    const button = el("readerEditPolygonBtn");
+    button.classList.remove("is-active");
+    button.setAttribute("aria-pressed", "false");
+    button.querySelector(".edit-polygon-label").textContent = "Edit Polygon";
+    button.title = "Seret titik-titik polygon untuk mengubah bentuk";
+
+    // Rebuild the styled preview from the updated in-memory geometry.
+    if (state.reader.data) renderReaderMap(false);
+  }
+
+  function buildEditableGeometry(geo) {
+    // Strip a duplicated closing vertex so each vertex gets exactly one draggable
+    // handle; the ring is re-closed on commit.
+    const ringCoordinates = (ring) => {
+      const closed = ring.length > 1
+        && ring[0][0] === ring[ring.length - 1][0]
+        && ring[0][1] === ring[ring.length - 1][1];
+      return closed ? ring.slice(0, -1) : ring;
+    };
+    const latLngFromCoord = (coord) => L.latLng(coord[1], coord[0]);
+
+    if (geo.type === "Polygon") {
+      const rings = geo.coordinates.map((ring) => ringCoordinates(ring).map(latLngFromCoord));
+      const layer = L.polygon(rings, editablePolygonStyle()).addTo(state.reader.map);
+      const edit = { kind: "Polygon", polys: [{ rings, layer }], markers: [] };
+      buildEditMarkers(edit);
+      return edit;
+    }
+
+    // MultiPolygon
+    const polys = geo.coordinates.map((polygon) => {
+      const rings = polygon.map((ring) => ringCoordinates(ring).map(latLngFromCoord));
+      const layer = L.polygon(rings, editablePolygonStyle()).addTo(state.reader.map);
+      return { rings, layer };
+    });
+    const edit = { kind: "MultiPolygon", polys, markers: [] };
+    buildEditMarkers(edit);
+    return edit;
+  }
+
+  function editablePolygonStyle() {
+    return {
+      color: "#72d64f",
+      weight: 3,
+      opacity: 1,
+      fillColor: "#8ee879",
+      fillOpacity: 0.18,
+      dashArray: "4 4"
+    };
+  }
+
+  const EDIT_VERTEX_ICON = L.divIcon({
+    className: "edit-vertex-icon",
+    iconSize: [16, 16],
+    iconAnchor: [8, 8],
+    html: '<span class="edit-vertex-dot"></span>'
+  });
+
+  function buildEditMarkers(edit) {
+    edit.polys.forEach((poly, polyIndex) => {
+      poly.rings.forEach((ring, ringIndex) => {
+        ring.forEach((latlng, vertexIndex) => {
+          const marker = L.marker(latlng, {
+            icon: EDIT_VERTEX_ICON,
+            draggable: true
+          }).addTo(state.reader.map);
+
+          marker.on("drag", () => {
+            const next = marker.getLatLng();
+            latlng.lat = next.lat;
+            latlng.lng = next.lng;
+            poly.layer.setLatLngs(poly.rings);
+          });
+
+          marker.on("dragend", () => {
+            commitEditedGeometry(edit, polyIndex, ringIndex, vertexIndex);
+          });
+
+          edit.markers.push({ marker, polyIndex, ringIndex, vertexIndex });
+        });
+      });
+    });
+  }
+
+  function commitEditedGeometry(edit, polyIndex, ringIndex, vertexIndex) {
+    const features = getFeatures(state.reader.data);
+    const feature = features[state.reader.selectedIndex];
+    if (!feature?.geometry) return;
+
+    const geo = feature.geometry;
+    const coordsForRings = (rings) => rings.map((ring) => {
+      const coords = ring.map((ll) => [ll.lng, ll.lat]);
+      closePolygonRing(coords);
+      return coords;
+    });
+
+    if (geo.type === "Polygon") {
+      geo.coordinates = coordsForRings(edit.polys[0].rings);
+    } else if (geo.type === "MultiPolygon") {
+      geo.coordinates = edit.polys.map((poly) => coordsForRings(poly.rings));
+    }
+
+    state.reader.dirty = true;
+    updateReaderEditState();
+    setInlineMessage("readerEditorMessage", "", "", true);
+    showToast("Bentuk diperbarui", `Titik ${vertexIndex + 1} pada polygon digeser.`, "success");
+  }
+
+  function closePolygonRing(coordinates) {
+    if (!coordinates || !coordinates.length) return;
+    const first = coordinates[0];
+    const last = coordinates[coordinates.length - 1];
+    if (!last || last[0] !== first[0] || last[1] !== first[1]) {
+      coordinates.push([first[0], first[1]]);
+    }
+  }
+
+  function fitEditableGeometry(map, edit) {
+    try {
+      const bounds = L.latLngBounds(edit.polys.flatMap((poly) => poly.rings.flat()));
+      map.fitBounds(bounds, { padding: [40, 40], maxZoom: 19 });
+    } catch (_e) {
+      /* ignore */
+    }
   }
 
   /* -------------------------------------------------------------------------- */
