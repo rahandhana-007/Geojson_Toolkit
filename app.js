@@ -2241,9 +2241,15 @@
 
   function setupTracker() {
     const input = el("trackerIdInput");
+    if (!input) {
+      // Stale index.html (e.g. an unfinished deploy) must not break Maker/Reader.
+      showToast("Modul Tracker belum tersedia", "Muat ulang halaman atau deploy ulang file index.html terbaru.", "error");
+      return;
+    }
 
     updateTrackerDataState();
     updateTrackerTargetCount();
+    updateTrackerDestinationControls();
 
     el("trackerMarkBtn").addEventListener("click", () => {
       void runTrackerSearch();
@@ -2255,6 +2261,14 @@
     });
     el("trackerLocateBtn").addEventListener("click", toggleTrackerLocate);
     el("trackerSetDestinationBtn").addEventListener("click", () => setTrackerDestination(state.tracker.selectedTarget));
+    el("trackerRouteMapBtn").addEventListener("click", () => {
+      const index = state.tracker.selectedTarget;
+      if (index < 0 || !state.tracker.targets[index]) {
+        showToast("Pilih polygon dulu", "Klik polygon di peta atau barisnya di daftar Polygon Terlacak.", "warning");
+        return;
+      }
+      setTrackerDestination(index);
+    });
     el("trackerRouteCloseBtn").addEventListener("click", clearTrackerDestination);
     el("trackerRouteRefreshBtn").addEventListener("click", () => {
       if (state.tracker.destination) void requestTrackerRoute({ force: true });
@@ -2554,6 +2568,7 @@
             const id = String(feature?.properties?.id ?? "—");
             const ha = Number(feature?.properties?.HA);
             subLayer.bindTooltip(`#${index + 1} · ${id}`, { sticky: true, direction: "top", className: "tracker-tooltip" });
+            subLayer.on("click", () => selectTrackerTarget(index));
             subLayer.bindPopup(
               `<div class="map-popup"><strong>#${index + 1} · ${escapeHtml(id)}</strong>` +
               `<code>${Number.isFinite(ha) ? `${formatNumber(ha, 3)} ha` : "area tidak tersedia"}</code>` +
@@ -2641,30 +2656,55 @@
     }
   }
 
+  /* Guarded DOM writes: an older cached index.html has no route markup. */
+  const setNodeText = (id, value) => { const node = el(id); if (node) node.textContent = value; };
+  const setNodeHidden = (id, value) => { const node = el(id); if (node) node.hidden = value; };
+
   function updateTrackerDestinationControls() {
     const panel = el("trackerRoutePanel");
     const button = el("trackerSetDestinationBtn");
+    if (!panel || !button) return;
     const label = button.querySelector(".tracker-destination-label");
     const target = state.tracker.targets[state.tracker.selectedTarget];
     const destinationIndex = state.tracker.destination ? state.tracker.destination.index : -1;
     const isCurrentTarget = Boolean(target && destinationIndex === state.tracker.selectedTarget);
 
-    panel.hidden = !state.tracker.targets.length;
-    el("trackerRouteTitle").textContent = target ? `Tujuan · #${state.tracker.selectedTarget + 1}` : "Set as Destination";
-    el("trackerRouteHint").hidden = Boolean(target);
+    // The panel stays visible from the start, otherwise the button looks missing.
+    panel.hidden = false;
+    setNodeText("trackerRouteTitle", target ? `Tujuan · #${state.tracker.selectedTarget + 1}` : "Set as Destination");
+
+    const hint = el("trackerRouteHint");
+    if (target) {
+      if (hint) hint.hidden = true;
+    } else if (hint) {
+      hint.hidden = false;
+      hint.innerHTML = state.tracker.targets.length
+        ? 'Pilih salah satu polygon di daftar <strong>Polygon Terlacak</strong>, lalu tekan tombol di bawah untuk mengambil jalur tercepat dari posisi GPS Anda.'
+        : 'Masukkan ID polygon di kolom <strong>ID Polygon</strong> lalu tekan <strong>Tandai Polygon</strong>. Setelah itu pilih barisnya dan tekan <strong>Set as Destination</strong> untuk mengambil jalur tercepat dari posisi GPS Anda.';
+    }
+
     button.hidden = isCurrentTarget && destinationIndex >= 0;
     button.disabled = !target;
+    button.title = target ? "Hitung jalur tercepat ke polygon ini" : "Pilih dulu salah satu polygon yang ditandai";
+
+    const mapButton = el("trackerRouteMapBtn");
+    if (!mapButton) return;
+    mapButton.disabled = !target;
+    mapButton.classList.toggle("is-active", Boolean(isCurrentTarget && destinationIndex >= 0));
+    mapButton.title = target
+      ? `Set as Destination · ${target.token}`
+      : "Pilih dulu salah satu polygon (klik petanya di peta atau barisnya di daftar)";
 
     if (isCurrentTarget && destinationIndex >= 0) {
       label.textContent = target.token;
-      el("trackerRouteTitle").textContent = `Tujuan · ${target.token}`;
+      setNodeText("trackerRouteTitle", `Tujuan · ${target.token}`);
     } else {
       label.textContent = target ? `Set as Destination · ${target.token}` : "Set as Destination";
     }
 
-    el("trackerRouteStats").hidden = !state.tracker.routeInfo;
-    el("trackerRouteActions").hidden = !state.tracker.routeInfo;
-    el("trackerRouteSteps").hidden = !(state.tracker.routeInfo && state.tracker.routeInfo.steps.length);
+    setNodeHidden("trackerRouteStats", !state.tracker.routeInfo);
+    setNodeHidden("trackerRouteActions", !state.tracker.routeInfo);
+    setNodeHidden("trackerRouteSteps", !(state.tracker.routeInfo && state.tracker.routeInfo.steps.length));
   }
 
   function fitTrackedPolygons(maxZoom = 18) {
@@ -3263,25 +3303,27 @@
   function renderTrackerRoutePanel() {
     const route = state.tracker.routeInfo;
     const stats = el("trackerRouteStats");
+    const stepsList = el("trackerRouteSteps");
+    if (!stats || !stepsList) return;
 
     if (!route) {
-      el("trackerRouteDistance").textContent = "—";
-      el("trackerRouteDuration").textContent = "—";
-      el("trackerRouteMode").textContent = "—";
-      el("trackerRouteSteps").replaceChildren();
-      el("trackerRouteSteps").hidden = true;
+      setNodeText("trackerRouteDistance", "—");
+      setNodeText("trackerRouteDuration", "—");
+      setNodeText("trackerRouteMode", "—");
+      stepsList.replaceChildren();
+      stepsList.hidden = true;
       stats.hidden = true;
-      el("trackerRouteActions").hidden = true;
+      setNodeHidden("trackerRouteActions", true);
       return;
     }
 
-    el("trackerRouteDistance").textContent = `${trackerRouteKilometers(route)} km`;
-    el("trackerRouteDuration").textContent = formatTrackerDuration(route.duration);
-    el("trackerRouteMode").textContent = route.shape === "straight" ? "LURUS" : "JALAN RAYA";
+    setNodeText("trackerRouteDistance", `${trackerRouteKilometers(route)} km`);
+    setNodeText("trackerRouteDuration", formatTrackerDuration(route.duration));
+    setNodeText("trackerRouteMode", route.shape === "straight" ? "LURUS" : "JALAN RAYA");
     stats.hidden = false;
-    el("trackerRouteActions").hidden = false;
+    setNodeHidden("trackerRouteActions", false);
 
-    const list = el("trackerRouteSteps");
+    const list = stepsList;
     list.replaceChildren();
     if (route.steps.length) {
       const shown = route.steps.slice(0, 40);
@@ -3307,6 +3349,7 @@
     }
 
     const link = el("trackerRouteMapsLink");
+    if (!link) return;
     const point = state.tracker.destination?.point;
     link.href = point
       ? `https://www.google.com/maps/dir/?api=1&destination=${point[0].toFixed(6)},${point[1].toFixed(6)}&travelmode=driving`

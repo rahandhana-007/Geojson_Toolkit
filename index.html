@@ -579,7 +579,7 @@
               <p class="tracker-empty">Belum ada ID ditandai. Masukkan ID polygon di kolom atas lalu tekan <strong>Tandai Polygon</strong>.</p>
             </div>
           </article>
-          <article class="panel tracker-route-panel" id="trackerRoutePanel" hidden>
+          <article class="panel tracker-route-panel" id="trackerRoutePanel">
             <div class="panel-head compact">
               <div>
                 <p class="panel-kicker">DESTINATION</p>
@@ -589,7 +589,7 @@
                 <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M6 6l12 12M18 6 6 18"/></svg>
               </button>
             </div>
-            <p class="tracker-route-hint" id="trackerRouteHint">Pilih salah satu polygon di daftar, lalu tekan <strong>Set as Destination</strong> untuk mengambil jalur tercepat dari posisi GPS Anda.</p>
+            <p class="tracker-route-hint" id="trackerRouteHint">Masukkan ID polygon di kolom <strong>ID Polygon</strong> lalu tekan <strong>Tandai Polygon</strong>. Setelah itu pilih barisnya dan tekan <strong>Set as Destination</strong> untuk mengambil jalur tercepat dari posisi GPS Anda.</p>
             <button class="button button-primary button-full" id="trackerSetDestinationBtn" type="button" disabled>
               <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg>
               <span class="tracker-destination-label">Set as Destination</span>
@@ -634,6 +634,10 @@
                 <button class="map-tool-button tracker-locate-button" id="trackerLocateBtn" type="button" aria-pressed="false" title="Pantau posisi GPS saya terhadap polygon yang dilacak">
                   <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="2"/></svg>
                   <span class="tracker-locate-label">Posisi Saya</span>
+                </button>
+                <button class="map-tool-button tracker-route-button" id="trackerRouteMapBtn" type="button" disabled title="Pilih polygon di daftar atau klik petanya, lalu hitung jalur tercepat">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg>
+                  <span>Set as Destination</span>
                 </button>
                 <button class="map-tool-button" id="trackerFitBtn" type="button" disabled title="Zoom ke semua polygon yang ditandai">
                   <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
