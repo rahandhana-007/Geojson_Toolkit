@@ -992,6 +992,43 @@ main { min-height: calc(100vh - var(--header-h)); }
 .tracker-tooltip { color: var(--ink); background: #fff; border: 1px solid var(--ink); border-radius: 0; box-shadow: 0 3px 10px rgba(0,0,0,.2); font: 700 9px/1.35 ui-monospace, monospace; }
 .tracker-tooltip::before { display: none; }
 
+/* Tracker · route to destination */
+.tracker-route-panel { border-top: 3px solid #1a73e8; }
+.tracker-route-panel .panel-head { border-bottom-color: #dfe6f5; }
+.tracker-route-hint { margin: 0; padding: 0 16px 12px; color: var(--muted); font-size: 10px; line-height: 1.5; }
+.tracker-route-hint strong { color: var(--ink); }
+.tracker-route-panel .button-full { width: calc(100% - 32px); margin: 0 16px 12px; }
+.tracker-route-panel .button-full[hidden] { display: none; }
+.tracker-route-stats { display: grid; grid-template-columns: repeat(3, minmax(0,1fr)); gap: 1px; margin: 0 16px 12px; background: var(--line); }
+.tracker-route-stats[hidden] { display: none; }
+.tracker-route-metric { padding: 10px 9px; background: #f7faff; }
+.tracker-route-metric small { display: block; color: #4b6fa8; font: 800 7px/1 ui-monospace, monospace; letter-spacing: .12em; }
+.tracker-route-metric strong { display: block; margin-top: 5px; color: #10305e; font-size: 13px; letter-spacing: -.01em; overflow-wrap: anywhere; }
+.tracker-route-metric:first-child strong { color: #1a73e8; font-size: 17px; }
+.tracker-route-panel .inline-alert { margin: 0 16px 12px; }
+.tracker-route-panel .inline-alert[hidden] { display: none; }
+.tracker-route-steps { margin: 0 16px 12px; padding: 0 0 0 20px; list-style: none; counter-reset: step; max-height: 232px; overflow: auto; border-top: 1px solid var(--line); }
+.tracker-route-steps[hidden] { display: none; }
+.tracker-step { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; padding: 8px 0 8px 0; border-bottom: 1px dashed #e4e4e4; counter-increment: step; font-size: 10px; line-height: 1.4; }
+.tracker-step::before { content: counter(step); flex: 0 0 auto; margin-left: -20px; width: 15px; height: 15px; color: #fff; background: #1a73e8; border-radius: 50%; font: 800 7px/15px ui-monospace, monospace; text-align: center; }
+.tracker-step span { flex: 1; min-width: 0; padding-left: 4px; }
+.tracker-step small { flex: 0 0 auto; color: var(--muted); font: 700 8px/1 ui-monospace, monospace; }
+.tracker-step.is-more { color: var(--muted); font-style: italic; }
+.tracker-step.is-more::before { display: none; }
+.tracker-route-actions { display: flex; gap: 8px; padding: 0 16px 14px; }
+.tracker-route-actions[hidden] { display: none; }
+.tracker-route-actions .button { flex: 1; min-width: 0; justify-content: center; }
+.tracker-row-flag { position: absolute; top: 8px; right: 28px; display: grid; place-items: center; width: 22px; height: 22px; color: var(--graphite); background: transparent; border: 0; border-radius: 50%; }
+.tracker-row-flag svg { width: 14px; height: 14px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.tracker-row-flag:hover { color: #fff; background: #1a73e8; }
+.tracker-row.is-selected { background: #eef4fe; box-shadow: inset 3px 0 0 #1a73e8; }
+.tracker-row.is-selected .tracker-row-main { background: transparent; }
+.tracker-row.is-selected .tracker-row-number { background: #1a73e8; }
+.tracker-row-status.is-route { color: #0f3f8f; background: #e3edfd; border-left-color: #1a73e8; }
+.tracker-flag-icon { display: block; width: 66px; height: 24px; transform: translate(-12px, -24px); }
+.tracker-flag-icon span { display: inline-block; margin-left: 14px; padding: 4px 7px 4px 16px; color: #fff; background: #1a73e8; border-radius: 2px; box-shadow: 0 2px 6px rgba(0,0,0,.35); font: 800 8px/1 ui-monospace, monospace; letter-spacing: .08em; }
+.tracker-flag-icon span::before { content: ""; position: absolute; left: 4px; bottom: -3px; width: 8px; height: 8px; background: #10305e; border-radius: 50%; box-shadow: 0 0 0 2px #fff; }
+
 /* Responsive */
 @media (max-width: 1180px) {
   .topbar { grid-template-columns: auto 1fr auto; padding: 0 22px; }
@@ -1021,6 +1058,7 @@ main { min-height: calc(100vh - var(--header-h)); }
   .tracker-layout { grid-template-columns: 1fr; }
   .tracker-sidebar { position: static; grid-template-columns: 1fr 1fr; }
   .tracker-result-list { max-height: 300px; }
+  .tracker-route-steps { max-height: 190px; }
   .tracker-map { height: 470px; }
   .feature-list { max-height: 330px; }
   .renamer-file-card { position: static; }

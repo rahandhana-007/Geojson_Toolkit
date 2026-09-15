@@ -52,6 +52,14 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, mengganti nama file Geo
 - Akurasi GPS memakai label yang sama dengan Maker (Sangat Akurat/Akurat/Kurang Akurat/Bad Signal) dan ditampilkan pada caption peta.
 - Pemantauan GPS berhenti otomatis saat tab meninggalkan Tracker, dan bisa dihentikan manual lewat tombol **Berhenti Lacak**.
 - Data BSRE dibaca dari `assets/bsre.geojson` yang sudah di-cache service worker, sehingga pelacakan berdasarkan ID tetap berjalan offline (peta memakai grid koordinat).
+- Tombol **Set as Destination** (atau ikon bendera di setiap baris daftar) memilih polygon target, lalu langsung menarik **jalur tercepat berwarna biru** dari posisi GPS Anda ke tepi polygon tersebut.
+- Estimasi ditampilkan sebagai **jarak dalam km** (2 desimal, format Indonesia), durasi tempuh, dan mode rute (Jalan Raya / Lurus).
+- Arahan per belahan (turn-by-turn) berbahasa Indonesia diambil dari langkah rute OSRM, lengkap dengan jarak tiap tahap dan nama jalan bila ada.
+- Rute dihitung oleh layanan publik OSRM (`router.project-osrm.org`, tanpa API key, dipanggil langsung dari browser). Saat jaringan/layanan tidak terjangkau, aplikasi otomatis memakai **perkiraan garis lurus** dari GPS ke tepi polygon dan menandainya sebagai estimasi (garis biru putus-putus, durasi tidak dikarang).
+- Titik tujuan adalah **titik terdekat di batas polygon** dari posisi Anda; jika Anda sudah berada di dalam polygon, rute tidak dihitung dan dilaporkan `0,00 km`.
+- Ada tombol **Perbarui Rute**, tautan **Google Maps** sebagai alternatif navigasi, dan rute diperbarui otomatis setelah Anda bergerak ≥25 m (dibatasi minimal 15 detik antar permintaan agar tidak membanjiri layanan).
+- Ikon bendera **TUJUAN** menandai ujung rute di peta; menekan × pada panel tujuan membersihkan garis biru, penanda, dan status baris.
+- Tujuan mengikuti polygon yang sama (dicocokkan berdasarkan ID) ketika daftar ditandai ulang; bila ID itu hilang, rute dibersihkan otomatis.
 
 ### Progressive Web App
 - Dapat diinstal di Android sebagai aplikasi standalone.

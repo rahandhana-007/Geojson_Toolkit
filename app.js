@@ -8,6 +8,10 @@
   const READER_EDIT_PIN = "663322";
   const TAB_NAMES = ["maker", "reader", "renamer", "tracker"];
   const TRACKER_MAX_TARGETS = 60;
+  const TRACKER_ROUTE_API = "https://router.project-osrm.org/route/v1/driving";
+  const TRACKER_ROUTE_TIMEOUT_MS = 12000;
+  const TRACKER_ROUTE_MIN_REFRESH_MS = 15000;
+  const TRACKER_ROUTE_MOVE_THRESHOLD_M = 25;
 
   let deferredInstallPrompt = null;
 
@@ -66,7 +70,16 @@
       watchId: null,
       myPosition: null,
       activePolygonLayers: [],
-      badges: []
+      badges: [],
+      selectedTarget: -1,
+      destination: null,
+      routeLayer: null,
+      routeMarker: null,
+      routeInfo: null,
+      routeLoading: false,
+      routeRequest: 0,
+      routePending: false,
+      lastError: null
     }
   };
 
@@ -268,6 +281,9 @@
     trackerContextPane.style.pointerEvents = "none";
     const trackerTargetPane = state.tracker.map.createPane("trackerTargetPane");
     trackerTargetPane.style.zIndex = "420";
+    const trackerRoutePane = state.tracker.map.createPane("trackerRoutePane");
+    trackerRoutePane.style.zIndex = "460";
+    trackerRoutePane.style.pointerEvents = "none";
     state.tracker.group = L.featureGroup().addTo(state.tracker.map);
   }
 
@@ -2238,6 +2254,11 @@
       void toggleTrackerContext();
     });
     el("trackerLocateBtn").addEventListener("click", toggleTrackerLocate);
+    el("trackerSetDestinationBtn").addEventListener("click", () => setTrackerDestination(state.tracker.selectedTarget));
+    el("trackerRouteCloseBtn").addEventListener("click", clearTrackerDestination);
+    el("trackerRouteRefreshBtn").addEventListener("click", () => {
+      if (state.tracker.destination) void requestTrackerRoute({ force: true });
+    });
 
     input.addEventListener("input", updateTrackerTargetCount);
     input.addEventListener("keydown", (event) => {
@@ -2254,7 +2275,10 @@
       const index = Number(button.dataset.index);
       const action = button.dataset.trackerAction;
       if (action === "focus") focusTrackerTarget(index);
-      else if (action === "remove") removeTrackerTarget(index);
+      else if (action === "route") {
+        selectTrackerTarget(index);
+        setTrackerDestination(index);
+      } else if (action === "remove") removeTrackerTarget(index);
       else if (action === "use") applyTrackerSuggestion(index, button.dataset.id);
     });
 
@@ -2379,7 +2403,11 @@
     }
 
     const limited = tokens.slice(0, TRACKER_MAX_TARGETS);
+    const keepSelection = state.tracker.targets[state.tracker.selectedTarget]?.token || null;
+    const keepDestination = state.tracker.destination?.token || null;
+
     state.tracker.targets = limited.map((token) => buildTrackerTarget(token));
+    restoreTrackerSelection(keepSelection, keepDestination);
 
     renderTrackerResults();
     renderTrackerMap();
@@ -2468,6 +2496,7 @@
     listElement.className = "tracker-rows";
     listElement.innerHTML = targets.map((target, index) => renderTrackerRow(target, index)).join("");
     list.replaceChildren(listElement);
+    updateTrackerDestinationControls();
   }
 
   function renderTrackerRow(target, index) {
@@ -2483,8 +2512,10 @@
           `${formatNumber(vertices, 0)} titik`
         ].filter(Boolean).join(" · ");
 
-    return `<li class="tracker-row${missing ? " is-missing" : ""}" data-index="${index}">
-  <button class="tracker-row-main" type="button" data-tracker-action="${missing ? "noop" : "focus"}" data-index="${index}" title="${missing ? "ID tidak ditemukan" : "Zoom ke polygon ini"}">
+    const selected = state.tracker.selectedTarget === index;
+
+    return `<li class="tracker-row${missing ? " is-missing" : ""}${selected ? " is-selected" : ""}" data-index="${index}">
+  <button class="tracker-row-main" type="button" data-tracker-action="${missing ? "noop" : "focus"}" data-index="${index}" title="${missing ? "ID tidak ditemukan" : "Pilih polygon ini dan zoom ke petanya"}">
     <span class="tracker-row-number">${index + 1}</span>
     <span class="tracker-row-copy">
       <strong>${escapeHtml(target.token)}</strong>
@@ -2496,6 +2527,9 @@
   ${target.suggestions.length
     ? `<span class="tracker-row-suggest">${target.suggestions.map((id) => `<button class="tracker-chip" type="button" data-tracker-action="use" data-index="${index}" data-id="${escapeHtml(id)}">${escapeHtml(id)}</button>`).join("")}</span>`
     : ""}
+  ${missing ? "" : `<button class="tracker-row-flag" type="button" data-tracker-action="route" data-index="${index}" aria-label="Jadikan ${escapeHtml(target.token)} sebagai tujuan" title="Set as destination">
+    <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 21s7-6.3 7-11a7 7 0 1 0-14 0c0 4.7 7 11 7 11Z"/><circle cx="12" cy="10" r="2.4"/></svg>
+  </button>`}
   <button class="tracker-row-x" type="button" data-tracker-action="remove" data-index="${index}" aria-label="Hapus ${escapeHtml(target.token)}" title="Hapus dari daftar">×</button>
 </li>`;
   }
@@ -2557,6 +2591,7 @@
       return;
     }
 
+    selectTrackerTarget(index);
     state.tracker.map.fitBounds(target.bounds, { padding: [42, 42], maxZoom: 18 });
     if (target.layer) {
       target.layer.setStyle(trackerTargetStyle(true));
@@ -2565,6 +2600,71 @@
         target.layer.setStyle(trackerTargetStyle(Boolean(target.proximity && target.proximity.inside)));
       }, 1400);
     }
+  }
+
+  /* Re-marking rebuilds the target list, so selection is tracked by ID instead of index. */
+  function restoreTrackerSelection(keepSelection, keepDestination) {
+    const foundIndex = (token) => state.tracker.targets.findIndex((target) => target.token === token && target.mode !== "none");
+
+    if (keepDestination) {
+      const index = foundIndex(keepDestination);
+      if (index === -1) {
+        clearTrackerDestination({ silent: true });
+      } else {
+        state.tracker.destination.index = index;
+      }
+    }
+
+    if (keepSelection) state.tracker.selectedTarget = foundIndex(keepSelection);
+    if (state.tracker.selectedTarget === -1) {
+      const single = state.tracker.targets.filter((target) => target.mode !== "none");
+      if (single.length === 1) state.tracker.selectedTarget = state.tracker.targets.indexOf(single[0]);
+    }
+  }
+
+  function selectTrackerTarget(index) {
+    if (index >= 0) {
+      const candidate = state.tracker.targets[index];
+      if (!candidate || !candidate.bounds) return;
+    }
+    const target = state.tracker.targets[index];
+    const changed = state.tracker.selectedTarget !== index;
+    state.tracker.selectedTarget = index;
+    // Classes only: re-rendering the list inside a click handler detaches the
+    // element Playwright/the browser is still acting on.
+    $$(".tracker-row").forEach((row) => {
+      row.classList.toggle("is-selected", Number(row.dataset.index) === index);
+    });
+    updateTrackerDestinationControls();
+    if (changed && state.tracker.destination && state.tracker.destination.index !== index) {
+      setInlineMessage("trackerRouteMessage", "", "info", true);
+    }
+  }
+
+  function updateTrackerDestinationControls() {
+    const panel = el("trackerRoutePanel");
+    const button = el("trackerSetDestinationBtn");
+    const label = button.querySelector(".tracker-destination-label");
+    const target = state.tracker.targets[state.tracker.selectedTarget];
+    const destinationIndex = state.tracker.destination ? state.tracker.destination.index : -1;
+    const isCurrentTarget = Boolean(target && destinationIndex === state.tracker.selectedTarget);
+
+    panel.hidden = !state.tracker.targets.length;
+    el("trackerRouteTitle").textContent = target ? `Tujuan · #${state.tracker.selectedTarget + 1}` : "Set as Destination";
+    el("trackerRouteHint").hidden = Boolean(target);
+    button.hidden = isCurrentTarget && destinationIndex >= 0;
+    button.disabled = !target;
+
+    if (isCurrentTarget && destinationIndex >= 0) {
+      label.textContent = target.token;
+      el("trackerRouteTitle").textContent = `Tujuan · ${target.token}`;
+    } else {
+      label.textContent = target ? `Set as Destination · ${target.token}` : "Set as Destination";
+    }
+
+    el("trackerRouteStats").hidden = !state.tracker.routeInfo;
+    el("trackerRouteActions").hidden = !state.tracker.routeInfo;
+    el("trackerRouteSteps").hidden = !(state.tracker.routeInfo && state.tracker.routeInfo.steps.length);
   }
 
   function fitTrackedPolygons(maxZoom = 18) {
@@ -2589,6 +2689,8 @@
   function removeTrackerTarget(index) {
     const targets = state.tracker.targets;
     if (!targets[index]) return;
+    if (state.tracker.destination && state.tracker.destination.index === index) clearTrackerDestination();
+    else if (state.tracker.selectedTarget === index) selectTrackerTarget(-1);
     el("trackerIdInput").value = targets
       .filter((_, position) => position !== index)
       .map((target) => target.token)
@@ -2612,6 +2714,8 @@
       target.proximity = null;
     });
     state.tracker.targets = [];
+    state.tracker.selectedTarget = -1;
+    if (state.tracker.destination) clearTrackerDestination();
     if (state.tracker.group) state.tracker.group.clearLayers();
     el("trackerFitBtn").disabled = true;
     renderTrackerResults();
@@ -2741,6 +2845,7 @@
     updateTrackerProximity();
     updateTrackerLocateButton();
     updateTrackerMapStatus();
+    maybeRefreshTrackerRoute();
 
     if (!hadFix) {
       if (state.tracker.targets.some((target) => target.bounds)) fitTrackedPolygons(17);
@@ -2778,6 +2883,7 @@
   }
 
   function updateTrackerProximity() {
+    /* Rewrites status spans in place; never replaces the list. */
     const point = state.tracker.myPosition ? [state.tracker.myPosition.lat, state.tracker.myPosition.lng] : null;
 
     state.tracker.targets.forEach((target) => {
@@ -2795,6 +2901,13 @@
       const status = document.querySelector(`[data-status-for="${index}"]`);
       const row = document.querySelector(`.tracker-row[data-index="${index}"]`);
       if (!status) return;
+      if (state.tracker.destination && state.tracker.destination.index === index) {
+        const km = state.tracker.routeInfo ? `${trackerRouteKilometers(state.tracker.routeInfo)} km ke tujuan` : "rute sedang dihitung";
+        status.textContent = `TUJUAN · ${km}`;
+        status.className = "tracker-row-status is-route";
+        if (row) row.classList.toggle("is-inside", Boolean(target.proximity && target.proximity.inside));
+        return;
+      }
       if (target.mode === "none") {
         status.textContent = "TIDAK DITEMUKAN";
         status.className = "tracker-row-status is-missing";
@@ -2881,7 +2994,411 @@
       const quality = classifyGpsAccuracy(position.accuracy);
       parts.push(`posisi ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)} · ±${formatNumber(position.accuracy, 1)} m · ${quality.label}`);
     }
+    if (state.tracker.routeInfo) {
+      const route = state.tracker.routeInfo;
+      parts.push(`tujuan ${state.tracker.destination?.token || "—"} · ${trackerRouteKilometers(route)} km · ${formatTrackerDuration(route.duration)}`);
+    }
     caption.textContent = parts.join(" · ");
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Tracker: route to the selected polygon                                      */
+  /* -------------------------------------------------------------------------- */
+
+  function setTrackerDestination(index, options = {}) {
+    const target = state.tracker.targets[index];
+    if (!target || !target.bounds) {
+      showToast("Polygon belum ditandai", "Pilih ID yang ada di data BSRE terlebih dahulu.", "warning");
+      return;
+    }
+
+    state.tracker.destination = { index, token: target.token, point: null, inside: false };
+    state.tracker.routeInfo = null;
+    state.tracker.lastRouteAt = 0;
+    state.tracker.lastRouteFrom = null;
+    renderTrackerRouteLayers();
+    updateTrackerDestinationControls();
+
+    if (!state.tracker.myPosition) {
+      state.tracker.routePending = true;
+      setInlineMessage("trackerRouteMessage", "Menunggu posisi GPS. Jalur dihitung otomatis begitu fix tersedia.", "info");
+      if (state.tracker.watchId === null) startTrackerLocate();
+      return;
+    }
+
+    state.tracker.routePending = false;
+    void requestTrackerRoute();
+  }
+
+  function clearTrackerDestination(options = {}) {
+    state.tracker.routeRequest += 1;
+    state.tracker.destination = null;
+    state.tracker.routeInfo = null;
+    state.tracker.routePending = false;
+    state.tracker.routeLoading = false;
+    state.tracker.lastRouteAt = 0;
+    state.tracker.lastRouteFrom = null;
+    renderTrackerRouteLayers();
+    setInlineMessage("trackerRouteMessage", "", "info", true);
+    updateTrackerDestinationControls();
+    updateTrackerProximity();
+    updateTrackerMapStatus();
+    if (!options.silent && state.tracker.targets.length) {
+      showToast("Tujuan dihapus", "Jalur biru dan estimasi jarak dibersihkan dari peta.", "warning");
+    }
+  }
+
+  async function requestTrackerRoute() {
+    if (!state.tracker.destination) return;
+
+    const position = state.tracker.myPosition;
+    if (!position) {
+      state.tracker.routePending = true;
+      return;
+    }
+
+    const target = state.tracker.targets[state.tracker.destination.index];
+    if (!target || !target.polygons.length) {
+      clearTrackerDestination({ silent: true });
+      return;
+    }
+
+    const origin = [position.lat, position.lng];
+    const polys = target.polygons.flatMap((poly) => poly.polys).filter((rings) => rings.length);
+    const nearest = polys.length ? nearestPointOnPolys(origin, polys) : null;
+    const insidePolygon = polys.length ? pointInPolys(origin, polys) : false;
+    const fallbackCenter = target.polygons.find((poly) => poly.metrics) ?.metrics ?.center || null;
+    const destinationPoint = insidePolygon ? (fallbackCenter || origin) : (nearest ? nearest.point : fallbackCenter);
+
+    if (!destinationPoint) {
+      setInlineMessage("trackerRouteMessage", "Polygon ini tidak punya koordinat yang valid untuk dijadikan tujuan.", "error");
+      return;
+    }
+
+    state.tracker.destination.point = destinationPoint;
+    // Being inside the plot is a point-in-polygon test, not a "close to the edge" test.
+    state.tracker.destination.inside = insidePolygon;
+    renderTrackerRouteLayers();
+
+    if (state.tracker.destination.inside) {
+      state.tracker.routeLoading = false;
+      state.tracker.routeInfo = {
+        distance: 0,
+        duration: null,
+        coordinates: [],
+        steps: [],
+        shape: "none",
+        mode: "Anda sudah berada di dalam polygon ini",
+        from: origin,
+        at: Date.now()
+      };
+      setInlineMessage("trackerRouteMessage", "0 km — Anda sudah berada di dalam polygon target, jadi tidak ada jalur yang perlu dihitung.", "success");
+      renderTrackerRouteLayers();
+      updateTrackerDestinationControls();
+      updateTrackerProximity();
+      updateTrackerMapStatus();
+      return;
+    }
+
+    const requestId = ++state.tracker.routeRequest;
+    state.tracker.routeLoading = true;
+    state.tracker.routeInfo = null;
+    setInlineMessage("trackerRouteMessage", "Menghitung jalur tercepat…", "info");
+    updateTrackerDestinationControls();
+
+    let route = null;
+    let notice = null;
+    try {
+      route = await fetchTrackerRoute(origin, destinationPoint);
+    } catch (error) {
+      if (requestId !== state.tracker.routeRequest) return;
+      route = {
+        distance: trackerMetersBetween(origin, destinationPoint),
+        duration: null,
+        coordinates: [origin, destinationPoint],
+        steps: [],
+        shape: "straight",
+        mode: "Garis lurus · tanpa jaringan"
+      };
+      notice = `${error.message || "Rute jaringan tidak tersedia"}. Estimasi memakai jarak garis lurus dari GPS Anda ke tepi polygon.`;
+    }
+
+    if (requestId !== state.tracker.routeRequest) return;
+
+    route.from = origin;
+    route.at = Date.now();
+    state.tracker.routeInfo = route;
+    state.tracker.routeLoading = false;
+    state.tracker.lastRouteAt = route.at;
+    state.tracker.lastRouteFrom = origin;
+
+    setInlineMessage("trackerRouteMessage", notice || `Jalur tercepat ${trackerRouteKilometers(route)} km · ${formatTrackerDuration(route.duration)} · ${route.steps.length} tahapan jalan.`, notice ? "warning" : "success");
+    renderTrackerRouteLayers();
+    updateTrackerDestinationControls();
+    updateTrackerProximity();
+    updateTrackerMapStatus();
+    fitTrackerRoute(route, [origin, destinationPoint]);
+  }
+
+  async function fetchTrackerRoute(origin, destination) {
+    const url = `${TRACKER_ROUTE_API}/${origin[1]},${origin[0]};${destination[1]},${destination[0]}`
+      + "?overview=full&geometries=geojson&steps=true&alternatives=false";
+
+    const controller = new AbortController();
+    const timer = window.setTimeout(() => controller.abort(), TRACKER_ROUTE_TIMEOUT_MS);
+    let response;
+    try {
+      response = await fetch(url, { signal: controller.signal, cache: "no-store", mode: "cors", credentials: "omit" });
+    } catch (error) {
+      throw new Error(error.name === "AbortError" ? "Layanan rute tidak merespons" : "Tidak dapat menghubungi layanan rute");
+    } finally {
+      window.clearTimeout(timer);
+    }
+
+    if (!response.ok) throw new Error(`Layanan rute menolak permintaan (HTTP ${response.status})`);
+
+    const data = await response.json().catch(() => null);
+    if (!data || data.code !== "Ok" || !Array.isArray(data.routes) || !data.routes.length) {
+      throw new Error("Tidak ada jalur beroda yang terhubung");
+    }
+
+    const route = data.routes[0];
+    const coordinates = Array.isArray(route.geometry?.coordinates)
+      ? route.geometry.coordinates.filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat)).map(([lng, lat]) => [lat, lng])
+      : [];
+    if (coordinates.length < 2) throw new Error("Geometri jalur tidak tersedia");
+
+    return {
+      distance: Number(route.distance),
+      duration: Number.isFinite(route.duration) ? route.duration : null,
+      coordinates,
+      steps: trackerRouteSteps(route),
+      shape: "road",
+      mode: "Jalur tercepat · jalan raya"
+    };
+  }
+
+  function trackerRouteSteps(route) {
+    const steps = route.legs?.[0]?.steps;
+    if (!Array.isArray(steps)) return [];
+    return steps
+      .filter((step) => step && step.maneuver && Number.isFinite(step.distance))
+      .map((step) => ({
+        text: trackerStepText(step),
+        distance: step.distance,
+        coordinates: Array.isArray(step.geometry?.coordinates)
+          ? step.geometry.coordinates.filter(([lng, lat]) => Number.isFinite(lng) && Number.isFinite(lat)).map(([lng, lat]) => [lat, lng])
+          : []
+      }));
+  }
+
+  function trackerStepText(step) {
+    const maneuver = step.maneuver || {};
+    const type = String(maneuver.type || "");
+    const word = trackerDirectionWord(maneuver.modifier);
+    const road = step.name ? ` di ${step.name}` : "";
+
+    if (type === "depart") return "Berangkat dari posisi Anda";
+    if (type === "arrive") return "Tiba di polygon tujuan";
+    if (type === "turn") return `Belok ${word}${step.name ? ` ke ${step.name}` : ""}`;
+    if (type === "new name") return `Lanjut${road}`;
+    if (type === "continue") return `Terus${road}`;
+    if (type === "merge") return `Gabung${road}`;
+    if (type === "on ramp") return `Masuk jalur${step.name ? ` ke ${step.name}` : ""}`;
+    if (type === "off ramp") return `Keluar${step.name ? ` ke ${step.name}` : ""}`;
+    if (type === "fork") return `Ambil lajur ${word}${road}`;
+    if (type === "roundabout" || type === "rotary") return `Ikuti bundaran${maneuver.exit ? ` lalu keluar ${maneuver.exit}` : ""}`;
+    if (type === "end of road") return `Sampai ujung jalan, belok ${word}`;
+    if (type === "notification" || type === "exit roundabout") return `Lanjut${road}`;
+    return `${type ? type.replace(/^\w/, (c) => c.toUpperCase()) : "Lanjut"}${word && word !== "lurus" ? ` (${word})` : ""}${road}`;
+  }
+
+  function trackerDirectionWord(modifier) {
+    const value = String(modifier || "straight");
+    if (value.startsWith("slight")) return value.includes("left") ? "kiri tipis" : "kanan tipis";
+    if (value.startsWith("sharp")) return value.includes("left") ? "kiri tajam" : "kanan tajam";
+    if (value.includes("uturn")) return "balik arah";
+    if (value === "straight") return "lurus";
+    return value.includes("left") ? "kiri" : "kanan";
+  }
+
+  function renderTrackerRouteLayers() {
+    const map = state.tracker.map;
+
+    [state.tracker.routeLayer, state.tracker.routeMarker].forEach((layer) => {
+      if (layer) map.removeLayer(layer);
+    });
+    state.tracker.routeLayer = null;
+    state.tracker.routeMarker = null;
+
+    const route = state.tracker.routeInfo;
+    if (route && route.coordinates.length > 1) {
+      const lines = [L.polyline(route.coordinates, { color: "#ffffff", weight: 9, opacity: 0.95, lineJoin: "round", lineCap: "round" })];
+      if (route.steps.length) {
+        // Thin white separators make the blue line read like a map direction layer.
+        lines.unshift(L.polyline(route.coordinates, { color: "#e8f0fe", weight: 7, opacity: 1, lineJoin: "round", lineCap: "round" }));
+      }
+      lines.push(L.polyline(route.coordinates, {
+        color: "#1a73e8",
+        weight: 5,
+        opacity: 1,
+        lineJoin: "round",
+        lineCap: "round",
+        dashArray: route.shape === "straight" ? "9 7" : null
+      }));
+      state.tracker.routeLayer = L.layerGroup(lines, { pane: "trackerRoutePane", interactive: false }).addTo(map);
+    }
+
+    const destination = state.tracker.destination;
+    if (destination && destination.point) {
+      state.tracker.routeMarker = L.marker(destination.point, {
+        pane: "trackerRoutePane",
+        icon: L.divIcon({ className: "tracker-flag-icon", html: "<span>TUJUAN</span>", iconSize: [66, 24], iconAnchor: [12, 24] })
+      }).addTo(map);
+    }
+
+    renderTrackerRoutePanel();
+  }
+
+  function renderTrackerRoutePanel() {
+    const route = state.tracker.routeInfo;
+    const stats = el("trackerRouteStats");
+
+    if (!route) {
+      el("trackerRouteDistance").textContent = "—";
+      el("trackerRouteDuration").textContent = "—";
+      el("trackerRouteMode").textContent = "—";
+      el("trackerRouteSteps").replaceChildren();
+      el("trackerRouteSteps").hidden = true;
+      stats.hidden = true;
+      el("trackerRouteActions").hidden = true;
+      return;
+    }
+
+    el("trackerRouteDistance").textContent = `${trackerRouteKilometers(route)} km`;
+    el("trackerRouteDuration").textContent = formatTrackerDuration(route.duration);
+    el("trackerRouteMode").textContent = route.shape === "straight" ? "LURUS" : "JALAN RAYA";
+    stats.hidden = false;
+    el("trackerRouteActions").hidden = false;
+
+    const list = el("trackerRouteSteps");
+    list.replaceChildren();
+    if (route.steps.length) {
+      const shown = route.steps.slice(0, 40);
+      shown.forEach((step) => {
+        const item = document.createElement("li");
+        item.className = "tracker-step";
+        const text = document.createElement("span");
+        text.textContent = step.text;
+        const distance = document.createElement("small");
+        distance.textContent = formatTrackerStepDistance(step.distance);
+        item.append(text, distance);
+        list.append(item);
+      });
+      if (route.steps.length > shown.length) {
+        const more = document.createElement("li");
+        more.className = "tracker-step is-more";
+        more.textContent = `+${route.steps.length - shown.length} langkah lainnya`;
+        list.append(more);
+      }
+      list.hidden = false;
+    } else {
+      list.hidden = true;
+    }
+
+    const link = el("trackerRouteMapsLink");
+    const point = state.tracker.destination?.point;
+    link.href = point
+      ? `https://www.google.com/maps/dir/?api=1&destination=${point[0].toFixed(6)},${point[1].toFixed(6)}&travelmode=driving`
+      : "#";
+  }
+
+  function trackerRouteKilometers(route) {
+    const meters = Number(route.distance);
+    return new Intl.NumberFormat("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+      .format((Number.isFinite(meters) ? meters : 0) / 1000);
+  }
+
+  function formatTrackerDuration(seconds) {
+    if (!Number.isFinite(seconds)) return "estimasi waktu tidak tersedia";
+    const total = Math.max(1, Math.round(seconds / 60));
+    if (total < 60) return `${formatNumber(total, 0)} menit`;
+    const hours = Math.floor(total / 60);
+    const minutes = total % 60;
+    return minutes ? `${formatNumber(hours, 0)} jam ${formatNumber(minutes, 0)} menit` : `${formatNumber(hours, 0)} jam`;
+  }
+
+  function fitTrackerRoute(route, anchors) {
+    const bounds = L.latLngBounds([]);
+    route.coordinates.forEach((point) => bounds.extend(point));
+    anchors.forEach((point) => { if (point) bounds.extend(point); });
+    if (!bounds.isValid()) return;
+    state.tracker.map.fitBounds(bounds, { padding: [46, 46], maxZoom: 17 });
+  }
+
+  function maybeRefreshTrackerRoute() {
+    if (!state.tracker.destination || state.tracker.routeLoading) return;
+    const position = state.tracker.myPosition;
+    if (!position) return;
+
+    if (state.tracker.routePending) {
+      state.tracker.routePending = false;
+      void requestTrackerRoute();
+      return;
+    }
+
+    const now = Date.now();
+    if (state.tracker.lastRouteAt && now - state.tracker.lastRouteAt < TRACKER_ROUTE_MIN_REFRESH_MS) return;
+    if (state.tracker.lastRouteFrom) {
+      const moved = trackerMetersBetween([position.lat, position.lng], state.tracker.lastRouteFrom);
+      if (moved < TRACKER_ROUTE_MOVE_THRESHOLD_M) return;
+    }
+    void requestTrackerRoute();
+  }
+
+  function trackerMetersBetween(from, to) {
+    return haversineDistance({ lat: from[0], lng: from[1] }, { lat: to[0], lng: to[1] });
+  }
+
+  function formatTrackerStepDistance(meters) {
+    if (!Number.isFinite(meters)) return "—";
+    if (meters < 1000) return `${formatNumber(Math.round(meters), 0)} m`;
+    return `${new Intl.NumberFormat("id-ID", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(meters / 1000)} km`;
+  }
+
+  /* Closest point on the polygon boundary, used as the routing endpoint. */
+  function nearestPointOnPolys(point, polys) {
+    const [lat, lng] = point;
+    const scaleY = 111320;
+    const scaleX = 111320 * Math.cos(toRadians(lat));
+    const px = lng * scaleX;
+    const py = lat * scaleY;
+    let best = null;
+    let bestDistance = Infinity;
+
+    polys.forEach((rings) => {
+      rings.forEach((ring) => {
+        for (let i = 0, len = ring.length; i < len; i += 1) {
+          const [ay, ax] = ring[i];
+          const [by, bx] = ring[(i + 1) % len];
+          const axm = ax * scaleX;
+          const aym = ay * scaleY;
+          const dx = (bx - ax) * scaleX;
+          const dy = (by - ay) * scaleY;
+          const lengthSq = dx * dx + dy * dy;
+          const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, ((px - axm) * dx + (py - aym) * dy) / lengthSq));
+          const cx = axm + t * dx;
+          const cy = aym + t * dy;
+          const distance = Math.hypot(px - cx, py - cy);
+          if (distance < bestDistance) {
+            bestDistance = distance;
+            best = [ay + t * (by - ay), ax + t * (bx - ax)];
+          }
+        }
+      });
+    });
+
+    return best ? { point: [roundCoordinate(best[0]), roundCoordinate(best[1])], distance: bestDistance } : null;
   }
 
   /* -------------------------------------------------------------------------- */
