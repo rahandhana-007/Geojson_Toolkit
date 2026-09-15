@@ -6,6 +6,8 @@
   const EARTH_RADIUS = 6371008.8;
   const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
   const READER_EDIT_PIN = "663322";
+  const TAB_NAMES = ["maker", "reader", "renamer", "tracker"];
+  const TRACKER_MAX_TARGETS = 60;
 
   let deferredInstallPrompt = null;
 
@@ -47,6 +49,24 @@
     renamer: {
       data: null,
       file: null
+    },
+    tracker: {
+      map: null,
+      data: null,
+      index: null,
+      ids: [],
+      featureCount: 0,
+      loading: false,
+      loadPromise: null,
+      targets: [],
+      group: null,
+      contextLayer: null,
+      contextVisible: false,
+      locateLayer: null,
+      watchId: null,
+      myPosition: null,
+      activePolygonLayers: [],
+      badges: []
     }
   };
 
@@ -71,6 +91,7 @@
     setupMaker();
     setupReader();
     setupRenamer();
+    setupTracker();
 
     window.addEventListener("beforeunload", (event) => {
       if (state.reader.dirty) {
@@ -177,13 +198,19 @@
     });
 
     const requestedTab = window.location.hash.replace("#", "");
-    if (["maker", "reader", "renamer"].includes(requestedTab)) {
+    if (TAB_NAMES.includes(requestedTab)) {
       switchTab(requestedTab, false);
     }
+
+    // PWA shortcuts and back/forward only change the hash, so follow it too.
+    window.addEventListener("hashchange", () => {
+      const tab = window.location.hash.replace("#", "");
+      if (TAB_NAMES.includes(tab) && tab !== state.activeTab) switchTab(tab, false);
+    });
   }
 
   function switchTab(tabName, updateHistory = true) {
-    if (!["maker", "reader", "renamer"].includes(tabName)) return;
+    if (!TAB_NAMES.includes(tabName)) return;
     state.activeTab = tabName;
 
     $$(".workspace").forEach((panel) => {
@@ -207,6 +234,14 @@
     if (map) {
       window.setTimeout(() => map.invalidateSize({ pan: false }), 80);
     }
+
+    if (tabName === "tracker") {
+      ensureTrackerData().catch(() => {
+        // Failure is surfaced by the Tracker status badge and on the next search.
+      });
+    } else if (state.tracker.watchId !== null) {
+      stopTrackerLocate();
+    }
   }
 
   /* -------------------------------------------------------------------------- */
@@ -226,6 +261,14 @@
     const readerBsrePane = state.reader.map.createPane("readerBsrePane");
     readerBsrePane.style.zIndex = "390";
     readerBsrePane.style.pointerEvents = "none";
+
+    state.tracker.map = createMap("trackerMap");
+    const trackerContextPane = state.tracker.map.createPane("trackerContextPane");
+    trackerContextPane.style.zIndex = "360";
+    trackerContextPane.style.pointerEvents = "none";
+    const trackerTargetPane = state.tracker.map.createPane("trackerTargetPane");
+    trackerTargetPane.style.zIndex = "420";
+    state.tracker.group = L.featureGroup().addTo(state.tracker.map);
   }
 
   function createMap(elementId) {
@@ -2174,6 +2217,828 @@
       ? `${filename} diunduh; ${changedCount} nilai properties diperbarui.`
       : `${filename} diunduh tanpa mengubah isi data.`;
     showToast("Rename selesai", detail, "success");
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Tracker: locate BSRE polygons by ID                                         */
+  /* -------------------------------------------------------------------------- */
+
+  function setupTracker() {
+    const input = el("trackerIdInput");
+
+    updateTrackerDataState();
+    updateTrackerTargetCount();
+
+    el("trackerMarkBtn").addEventListener("click", () => {
+      void runTrackerSearch();
+    });
+    el("trackerClearBtn").addEventListener("click", () => clearTracker(true));
+    el("trackerFitBtn").addEventListener("click", () => fitTrackedPolygons());
+    el("trackerContextBtn").addEventListener("click", () => {
+      void toggleTrackerContext();
+    });
+    el("trackerLocateBtn").addEventListener("click", toggleTrackerLocate);
+
+    input.addEventListener("input", updateTrackerTargetCount);
+    input.addEventListener("keydown", (event) => {
+      if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+        event.preventDefault();
+        void runTrackerSearch();
+      }
+    });
+
+    // Row actions are delegated so the list can be re-rendered freely.
+    el("trackerResultList").addEventListener("click", (event) => {
+      const button = event.target.closest("button[data-tracker-action]");
+      if (!button) return;
+      const index = Number(button.dataset.index);
+      const action = button.dataset.trackerAction;
+      if (action === "focus") focusTrackerTarget(index);
+      else if (action === "remove") removeTrackerTarget(index);
+      else if (action === "use") applyTrackerSuggestion(index, button.dataset.id);
+    });
+
+    if (window.location.hash.replace("#", "") === "tracker") void ensureTrackerData();
+  }
+
+  async function ensureTrackerData() {
+    if (state.tracker.data) return state.tracker.data;
+    if (state.tracker.loadPromise) return state.tracker.loadPromise;
+
+    state.tracker.loading = true;
+    updateTrackerDataState();
+
+    const load = (async () => {
+      try {
+        const response = await fetch("assets/bsre.geojson", { cache: "force-cache" });
+        if (!response.ok) throw new Error(`HTTP ${response.status}`);
+        const data = await response.json();
+        const features = getFeatures(data);
+        const index = new Map();
+        const ids = [];
+
+        features.forEach((feature, featureIndex) => {
+          const id = String(feature?.properties?.id ?? "").trim().toUpperCase();
+          if (!id) return;
+          const entry = { id, featureIndex, feature };
+          if (!index.has(id)) index.set(id, []);
+          index.get(id).push(entry);
+          ids.push(id);
+        });
+
+        state.tracker.data = data;
+        state.tracker.index = index;
+        state.tracker.ids = ids;
+        state.tracker.featureCount = ids.length;
+        state.tracker.lastError = null;
+        return data;
+      } catch (error) {
+        state.tracker.lastError = error;
+        throw error;
+      } finally {
+        state.tracker.loading = false;
+        state.tracker.loadPromise = null;
+        updateTrackerDataState();
+        updateTrackerMapStatus();
+      }
+    })();
+
+    state.tracker.loadPromise = load;
+    return load;
+  }
+
+  function updateTrackerDataState() {
+    const badge = el("trackerDataState");
+    if (!badge) return;
+    if (state.tracker.data) {
+      badge.textContent = `BSRE ${formatNumber(state.tracker.featureCount, 0)} POLYGON`;
+      return;
+    }
+    badge.textContent = state.tracker.loading ? "MEMUAT BSRE…" : "BSRE BELUM SIAP";
+  }
+
+  function parseTrackerIds(rawText) {
+    const seen = new Set();
+    const tokens = [];
+
+    String(rawText || "")
+      .split(/[\s,;]+/)
+      .map((token) => token.replace(/^["'`.,;:]+|["'`.,;:]+$/g, "").trim().toUpperCase())
+      .filter(Boolean)
+      .forEach((token) => {
+        if (seen.has(token)) return;
+        seen.add(token);
+        tokens.push(token);
+      });
+
+    return tokens;
+  }
+
+  /* Exact ID first; a bare block ID (BSRE ids are "BLOCK-n") then matches
+     every sub-polygon of that block. */
+  function matchTrackerToken(token) {
+    const index = state.tracker.index;
+    if (!index) return { matches: [], mode: "unavailable" };
+
+    const exact = index.get(token);
+    if (exact && exact.length) return { matches: exact, mode: "exact" };
+
+    const block = [];
+    index.forEach((entries, id) => {
+      if (id.split("-")[0] === token) block.push(...entries);
+    });
+    if (block.length) return { matches: block, mode: "block" };
+
+    return { matches: [], mode: "none" };
+  }
+
+  function suggestTrackerIds(token, limit = 4) {
+    const core = token.replace(/-/g, "");
+    if (core.length < 4) return [];
+    return (state.tracker.ids || []).filter((id) => id.replace(/-/g, "").includes(core)).slice(0, limit);
+  }
+
+  async function runTrackerSearch() {
+    const tokens = parseTrackerIds(el("trackerIdInput").value);
+
+    if (!tokens.length) {
+      clearTracker(false);
+      setInlineMessage("trackerMessage", "Masukkan minimal satu ID polygon BSRE, misalnya AA00021551-1.", "error");
+      return;
+    }
+
+    const button = el("trackerMarkBtn");
+    button.disabled = true;
+    try {
+      await ensureTrackerData();
+    } catch (error) {
+      setInlineMessage("trackerMessage", `Data BSRE tidak dapat dimuat: ${error.message}`, "error");
+      return;
+    } finally {
+      button.disabled = false;
+    }
+
+    const limited = tokens.slice(0, TRACKER_MAX_TARGETS);
+    state.tracker.targets = limited.map((token) => buildTrackerTarget(token));
+
+    renderTrackerResults();
+    renderTrackerMap();
+
+    const found = state.tracker.targets.filter((target) => target.bounds);
+    const missing = state.tracker.targets.filter((target) => target.mode === "none");
+    const polygonCount = state.tracker.targets.reduce((sum, target) => sum + target.polygons.length, 0);
+
+    if (el("trackerFitToggle").checked) {
+      fitTrackedPolygons();
+      // On narrow screens the map sits below the form; keep the result in view.
+      if (window.matchMedia("(max-width: 960px)").matches) {
+        document.querySelector(".tracker-map-panel")?.scrollIntoView({ behavior: "smooth", block: "center" });
+      }
+    }
+
+    const lines = [
+      `${formatNumber(found.length, 0)} dari ${formatNumber(state.tracker.targets.length, 0)} ID ditandai · ${formatNumber(polygonCount, 0)} polygon BSRE.`
+    ];
+    if (tokens.length > limited.length) {
+      lines.push(`Hanya ${TRACKER_MAX_TARGETS} ID pertama yang diproses.`);
+    }
+    if (missing.length) {
+      lines.push(...missing.map((target) => `${target.token}: tidak ditemukan${target.suggestions.length ? ` · mirip: ${target.suggestions.join(", ")}` : ""}.`));
+    }
+    setInlineMessage("trackerMessage", missing.length ? lines.join("\n") : lines[0], missing.length ? "warning" : "success");
+  }
+
+  function buildTrackerTarget(token) {
+    const { matches, mode } = matchTrackerToken(token);
+    const polygons = matches.map((entry) => {
+      const metrics = trackerMetrics(entry.feature);
+      return {
+        id: entry.id,
+        feature: entry.feature,
+        ha: Number(entry.feature?.properties?.HA),
+        metrics,
+        polys: geometryPolys(entry.feature?.geometry)
+      };
+    });
+
+    let bounds = null;
+    polygons.forEach((poly) => {
+      if (!poly.metrics) return;
+      bounds = bounds ? bounds.extend(poly.metrics.bounds) : L.latLngBounds(poly.metrics.bounds);
+    });
+
+    return {
+      token,
+      mode,
+      polygons,
+      bounds,
+      suggestions: mode === "none" ? suggestTrackerIds(token) : [],
+      layer: null,
+      markers: [],
+      proximity: null
+    };
+  }
+
+  function trackerTargetStyle(active = false) {
+    return active
+      ? { pane: "trackerTargetPane", color: "#111111", weight: 5, opacity: 1, fillColor: "#e60012", fillOpacity: 0.42 }
+      : { pane: "trackerTargetPane", color: "#e60012", weight: 3, opacity: 1, fillColor: "#ff4d5a", fillOpacity: 0.26 };
+  }
+
+  function renderTrackerResults() {
+    const list = el("trackerResultList");
+    const targets = state.tracker.targets;
+    const marked = targets.filter((target) => target.mode !== "none").length;
+
+    el("trackerTargetCount").textContent = formatNumber(targets.length, 0);
+    el("trackerResultCount").textContent = formatNumber(marked, 0);
+    el("trackerFitBtn").disabled = !targets.some((target) => target.bounds);
+
+    if (!targets.length) {
+      list.replaceChildren(
+        Object.assign(document.createElement("p"), {
+          className: "tracker-empty",
+          innerHTML: 'Belum ada ID ditandai. Masukkan ID polygon di kolom atas lalu tekan <strong>Tandai Polygon</strong>.'
+        })
+      );
+      return;
+    }
+
+    const listElement = document.createElement("ul");
+    listElement.className = "tracker-rows";
+    listElement.innerHTML = targets.map((target, index) => renderTrackerRow(target, index)).join("");
+    list.replaceChildren(listElement);
+  }
+
+  function renderTrackerRow(target, index) {
+    const missing = target.mode === "none";
+    const area = target.polygons.reduce((sum, poly) => sum + (Number.isFinite(poly.ha) ? poly.ha : 0), 0);
+    const vertices = target.polygons.reduce((sum, poly) => sum + (poly.metrics ? poly.metrics.vertices : 0), 0);
+    const detail = missing
+      ? "ID tidak ada di data BSRE"
+      : [
+          target.polygons.length > 1 ? `${formatNumber(target.polygons.length, 0)} sub-polygon` : null,
+          target.polygons.length === 1 ? escapeHtml(target.polygons[0].id) : null,
+          `${formatNumber(area, 3)} ha`,
+          `${formatNumber(vertices, 0)} titik`
+        ].filter(Boolean).join(" · ");
+
+    return `<li class="tracker-row${missing ? " is-missing" : ""}" data-index="${index}">
+  <button class="tracker-row-main" type="button" data-tracker-action="${missing ? "noop" : "focus"}" data-index="${index}" title="${missing ? "ID tidak ditemukan" : "Zoom ke polygon ini"}">
+    <span class="tracker-row-number">${index + 1}</span>
+    <span class="tracker-row-copy">
+      <strong>${escapeHtml(target.token)}</strong>
+      <small>${detail}</small>
+      <span class="tracker-row-status" data-status-for="${index}">${missing ? "TIDAK DITEMUKAN" : "DITANDAI"}</span>
+    </span>
+    ${target.mode === "block" ? '<span class="tracker-row-tag" title="ID blok cocok dengan beberapa sub-polygon">BLOK</span>' : ""}
+  </button>
+  ${target.suggestions.length
+    ? `<span class="tracker-row-suggest">${target.suggestions.map((id) => `<button class="tracker-chip" type="button" data-tracker-action="use" data-index="${index}" data-id="${escapeHtml(id)}">${escapeHtml(id)}</button>`).join("")}</span>`
+    : ""}
+  <button class="tracker-row-x" type="button" data-tracker-action="remove" data-index="${index}" aria-label="Hapus ${escapeHtml(target.token)}" title="Hapus dari daftar">×</button>
+</li>`;
+  }
+
+  function renderTrackerMap() {
+    const group = state.tracker.group;
+    group.clearLayers();
+    state.tracker.targets.forEach((target) => {
+      target.layer = null;
+      target.markers = [];
+    });
+
+    state.tracker.targets.forEach((target, index) => {
+      if (!target.polygons.length) return;
+
+      const layer = L.geoJSON(
+        { type: "FeatureCollection", features: target.polygons.map((poly) => poly.feature) },
+        {
+          pane: "trackerTargetPane",
+          style: () => trackerTargetStyle(Boolean(target.proximity && target.proximity.inside)),
+          onEachFeature: (feature, subLayer) => {
+            const id = String(feature?.properties?.id ?? "—");
+            const ha = Number(feature?.properties?.HA);
+            subLayer.bindTooltip(`#${index + 1} · ${id}`, { sticky: true, direction: "top", className: "tracker-tooltip" });
+            subLayer.bindPopup(
+              `<div class="map-popup"><strong>#${index + 1} · ${escapeHtml(id)}</strong>` +
+              `<code>${Number.isFinite(ha) ? `${formatNumber(ha, 3)} ha` : "area tidak tersedia"}</code>` +
+              `<small>${target.polygons.length > 1 ? "Bagian dari ID blok " : ""}${escapeHtml(target.token)}</small></div>`,
+              { autoPan: true }
+            );
+          }
+        }
+      ).addTo(group);
+
+      target.layer = layer;
+
+      target.polygons.forEach((poly, polyIndex) => {
+        if (!poly.metrics) return;
+        const label = target.polygons.length > 1 ? `${index + 1}${String.fromCharCode(97 + polyIndex)}` : String(index + 1);
+        const marker = L.marker(poly.metrics.center, {
+          icon: L.divIcon({ className: "tracker-badge-icon", html: `<span>${label}</span>`, iconSize: [26, 26], iconAnchor: [13, 13] }),
+          keyboard: false,
+          riseOnHover: true
+        }).addTo(group);
+        marker.bindTooltip(`${poly.id} · klik untuk zoom`, { direction: "top", offset: [0, -14], className: "tracker-tooltip" });
+        marker.on("click", () => focusTrackerTarget(index));
+        target.markers.push(marker);
+      });
+    });
+
+    updateTrackerMapStatus();
+  }
+
+  function focusTrackerTarget(index) {
+    const target = state.tracker.targets[index];
+    if (!target) return;
+    if (!target.bounds) {
+      showToast("Polygon tidak ditemukan", `ID ${target.token} tidak ada di data BSRE.`, "warning");
+      return;
+    }
+
+    state.tracker.map.fitBounds(target.bounds, { padding: [42, 42], maxZoom: 18 });
+    if (target.layer) {
+      target.layer.setStyle(trackerTargetStyle(true));
+      window.setTimeout(() => {
+        if (!target.layer) return;
+        target.layer.setStyle(trackerTargetStyle(Boolean(target.proximity && target.proximity.inside)));
+      }, 1400);
+    }
+  }
+
+  function fitTrackedPolygons(maxZoom = 18) {
+    const targets = state.tracker.targets.filter((target) => target.bounds);
+    if (!targets.length) {
+      showToast("Belum ada polygon ditandai", "Masukkan ID polygon BSRE lalu tekan Tandai Polygon.", "warning");
+      return;
+    }
+
+    const bounds = targets.reduce(
+      (acc, target) => (acc ? acc.extend(target.bounds) : L.latLngBounds(target.bounds)),
+      null
+    );
+
+    if (state.tracker.myPosition) {
+      bounds.extend(L.latLng([state.tracker.myPosition.lat, state.tracker.myPosition.lng]));
+    }
+
+    state.tracker.map.fitBounds(bounds, { padding: [36, 36], maxZoom });
+  }
+
+  function removeTrackerTarget(index) {
+    const targets = state.tracker.targets;
+    if (!targets[index]) return;
+    el("trackerIdInput").value = targets
+      .filter((_, position) => position !== index)
+      .map((target) => target.token)
+      .join("\n");
+    void runTrackerSearch();
+  }
+
+  function applyTrackerSuggestion(index, id) {
+    const targets = state.tracker.targets;
+    if (!targets[index] || !id) return;
+    targets[index] = { ...targets[index], token: id };
+    el("trackerIdInput").value = targets.map((target) => target.token).join("\n");
+    void runTrackerSearch();
+  }
+
+  function clearTracker(clearInput) {
+    if (clearInput) el("trackerIdInput").value = "";
+    state.tracker.targets.forEach((target) => {
+      target.layer = null;
+      target.markers = [];
+      target.proximity = null;
+    });
+    state.tracker.targets = [];
+    if (state.tracker.group) state.tracker.group.clearLayers();
+    el("trackerFitBtn").disabled = true;
+    renderTrackerResults();
+    updateTrackerTargetCount();
+    setInlineMessage("trackerMessage", "", "info", true);
+    updateTrackerMapStatus();
+  }
+
+  function updateTrackerTargetCount() {
+    const count = parseTrackerIds(el("trackerIdInput").value).length;
+    el("trackerTargetCount").textContent = formatNumber(count, 0);
+  }
+
+  async function toggleTrackerContext() {
+    const button = el("trackerContextBtn");
+    const label = button.querySelector("span");
+
+    if (state.tracker.contextLayer) {
+      if (state.tracker.contextVisible) {
+        state.tracker.map.removeLayer(state.tracker.contextLayer);
+        state.tracker.contextVisible = false;
+        showToast("Konteks BSRE disembunyikan", "Hanya polygon yang ditandai yang ditampilkan.", "warning");
+      } else {
+        state.tracker.contextLayer.addTo(state.tracker.map);
+        state.tracker.contextVisible = true;
+      }
+      updateTrackerContextButton();
+      return;
+    }
+
+    if (state.tracker.contextLoading) return;
+    state.tracker.contextLoading = true;
+    button.disabled = true;
+    label.textContent = "Memuat…";
+
+    try {
+      await ensureTrackerData();
+      state.tracker.contextLayer = L.geoJSON(state.tracker.data, {
+        pane: "trackerContextPane",
+        interactive: false,
+        style: { color: "#9aa0a6", weight: 1, opacity: 0.5, fillColor: "#7dd3fc", fillOpacity: 0.06 }
+      }).addTo(state.tracker.map);
+      state.tracker.contextVisible = true;
+      showToast(
+        "Konteks BSRE aktif",
+        `${formatNumber(state.tracker.featureCount, 0)} polygon BSRE ditampilkan sebagai latar; target tetap merah di atasnya.`,
+        "success"
+      );
+    } catch (error) {
+      showToast("Konteks BSRE gagal", `File polygon BSRE tidak dapat dibuka: ${error.message}`, "error");
+    } finally {
+      state.tracker.contextLoading = false;
+      button.disabled = false;
+      label.textContent = "Konteks BSRE";
+      updateTrackerContextButton();
+    }
+  }
+
+  function updateTrackerContextButton() {
+    const button = el("trackerContextBtn");
+    button.classList.toggle("is-active", state.tracker.contextVisible);
+    button.setAttribute("aria-pressed", String(state.tracker.contextVisible));
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Tracker: live position against the marked polygons                          */
+  /* -------------------------------------------------------------------------- */
+
+  function toggleTrackerLocate() {
+    if (state.tracker.watchId !== null) stopTrackerLocate();
+    else startTrackerLocate();
+  }
+
+  function startTrackerLocate() {
+    if (!("geolocation" in navigator)) {
+      showToast("GPS tidak tersedia", "Browser ini tidak mendukung Location API.", "error");
+      return;
+    }
+
+    state.tracker.locateError = null;
+    state.tracker.watchId = navigator.geolocation.watchPosition(
+      handleTrackerPosition,
+      (error) => {
+        state.tracker.locateError = error;
+        updateTrackerLocateButton();
+        updateTrackerMapStatus();
+        showToast("Posisi belum terbaca", trackerLocateMessage(error), "error");
+      },
+      { enableHighAccuracy: true, timeout: 20000, maximumAge: 3000 }
+    );
+
+    updateTrackerLocateButton();
+    showToast("Pelacakan posisi aktif", "Posisi GPS Anda dibandingkan langsung dengan polygon yang ditandai.", "success");
+  }
+
+  function stopTrackerLocate() {
+    if (state.tracker.watchId === null) return;
+    navigator.geolocation.clearWatch(state.tracker.watchId);
+    state.tracker.watchId = null;
+    updateTrackerLocateButton();
+    updateTrackerProximity();
+    updateTrackerMapStatus();
+  }
+
+  function trackerLocateMessage(error) {
+    const messages = {
+      1: "Izinkan akses lokasi pada pengaturan browser, lalu coba lagi.",
+      2: "Posisi belum tersedia. Pindah ke area terbuka lalu coba lagi.",
+      3: "GPS terlalu lama merespons. Coba sekali lagi."
+    };
+    return messages[error?.code] || error?.message || "Terjadi kesalahan geolocation.";
+  }
+
+  function handleTrackerPosition(position) {
+    const hadFix = Boolean(state.tracker.myPosition);
+    const coords = position.coords || {};
+    const accuracy = Number.isFinite(coords.accuracy) ? Math.max(1, Math.round(coords.accuracy * 10) / 10) : null;
+    state.tracker.myPosition = {
+      lat: roundCoordinate(coords.latitude),
+      lng: roundCoordinate(coords.longitude),
+      accuracy,
+      at: Date.now()
+    };
+    state.tracker.locateError = null;
+
+    drawTrackerPosition();
+    updateTrackerProximity();
+    updateTrackerLocateButton();
+    updateTrackerMapStatus();
+
+    if (!hadFix) {
+      if (state.tracker.targets.some((target) => target.bounds)) fitTrackedPolygons(17);
+      else state.tracker.map.setView([state.tracker.myPosition.lat, state.tracker.myPosition.lng], 17);
+    }
+  }
+
+  function drawTrackerPosition() {
+    const map = state.tracker.map;
+    if (state.tracker.locateLayer) map.removeLayer(state.tracker.locateLayer);
+
+    const { lat, lng, accuracy } = state.tracker.myPosition;
+    const group = L.featureGroup([], { pane: "trackerTargetPane" });
+
+    if (Number.isFinite(accuracy)) {
+      L.circle([lat, lng], {
+        radius: accuracy,
+        pane: "trackerContextPane",
+        color: "#38bdf8",
+        weight: 1.5,
+        opacity: 0.9,
+        fillColor: "#7dd3fc",
+        fillOpacity: 0.14,
+        interactive: false
+      }).addTo(group);
+    }
+
+    L.marker([lat, lng], {
+      icon: L.divIcon({ className: "tracker-me-icon", html: "<i></i>", iconSize: [22, 22], iconAnchor: [11, 11] })
+    })
+      .bindPopup(`<div class="map-popup"><strong>Posisi Anda</strong><code>${lat.toFixed(6)}<br>${lng.toFixed(6)}</code><small>${Number.isFinite(accuracy) ? `akurasi ±${formatNumber(accuracy, 1)} m` : "akurasi tidak dilaporkan"}</small></div>`)
+      .addTo(group);
+
+    state.tracker.locateLayer = group.addTo(map);
+  }
+
+  function updateTrackerProximity() {
+    const point = state.tracker.myPosition ? [state.tracker.myPosition.lat, state.tracker.myPosition.lng] : null;
+
+    state.tracker.targets.forEach((target) => {
+      const polys = target.polygons.length ? target.polygons.flatMap((poly) => poly.polys) : [];
+      if (!point || !polys.length) {
+        target.proximity = null;
+        return;
+      }
+      const inside = pointInPolys(point, polys);
+      target.proximity = { inside, distance: distanceToPolys(point, polys) };
+      if (target.layer) target.layer.setStyle(trackerTargetStyle(inside));
+    });
+
+    state.tracker.targets.forEach((target, index) => {
+      const status = document.querySelector(`[data-status-for="${index}"]`);
+      const row = document.querySelector(`.tracker-row[data-index="${index}"]`);
+      if (!status) return;
+      if (target.mode === "none") {
+        status.textContent = "TIDAK DITEMUKAN";
+        status.className = "tracker-row-status is-missing";
+        if (row) row.classList.remove("is-inside");
+        return;
+      }
+      if (!target.proximity) {
+        status.textContent = target.polygons.length > 1 ? `${formatNumber(target.polygons.length, 0)} POLYGON DITANDAI` : "DITANDAI";
+        status.className = "tracker-row-status";
+        if (row) row.classList.remove("is-inside");
+        return;
+      }
+      if (target.proximity.inside) {
+        status.textContent = "POSISI ANDA DI DALAM POLYGON";
+        status.className = "tracker-row-status is-inside";
+        if (row) row.classList.add("is-inside");
+      } else {
+        status.textContent = `${formatTrackerDistance(target.proximity.distance)} dari tepi polygon`;
+        status.className = "tracker-row-status is-outside";
+        if (row) row.classList.remove("is-inside");
+      }
+    });
+  }
+
+  /* Field-friendly distance: metres below 1 km, kilometres above. */
+  function formatTrackerDistance(meters) {
+    if (!Number.isFinite(meters)) return "jarak belum tersedia";
+    if (meters < 10) return `±${formatNumber(Math.round(meters * 10) / 10, 1)} m`;
+    if (meters < 1000) return `±${formatNumber(Math.round(meters), 0)} m`;
+    return `±${formatNumber(meters / 1000, 2)} km`;
+  }
+
+  function updateTrackerLocateButton() {
+    const button = el("trackerLocateBtn");
+    const label = button.querySelector(".tracker-locate-label");
+    const watching = state.tracker.watchId !== null;
+    const error = state.tracker.locateError;
+
+    button.classList.toggle("is-active", watching && !error);
+    button.classList.toggle("is-loading", watching && !state.tracker.myPosition && !error);
+    button.setAttribute("aria-pressed", String(watching));
+    label.textContent = watching
+      ? (state.tracker.myPosition ? "Berhenti Lacak" : "Mencari…")
+      : (state.tracker.myPosition ? "Lacak Lagi" : "Posisi Saya");
+    button.title = watching
+      ? "Hentikan pemantauan posisi GPS"
+      : "Tampilkan posisi saya dan jaraknya ke polygon yang ditandai";
+  }
+
+  function updateTrackerMapStatus() {
+    const badge = el("trackerMapStatus");
+    const caption = el("trackerMapCaption");
+    const targets = state.tracker.targets;
+    const marked = targets.filter((target) => target.mode !== "none").length;
+    const missing = targets.filter((target) => target.mode === "none").length;
+    const insideCount = targets.filter((target) => target.proximity && target.proximity.inside).length;
+    const watching = state.tracker.watchId !== null;
+    const position = state.tracker.myPosition;
+
+    let text;
+    if (watching && !position) text = "MENCARI GPS…";
+    else if (watching && state.tracker.locateError) text = "GPS GAGAL";
+    else if (position) {
+      const phrase = insideCount
+        ? `${formatNumber(insideCount, 0)} POLYGON DI LOKASI ANDA`
+        : (marked ? "DI LUAR POLYGON TARGET" : "POSISI TERKUNCI");
+      text = watching ? phrase : `TERAKHIR · ${phrase}`;
+    }
+    else if (marked && missing) text = `${formatNumber(marked, 0)} DITANDAI · ${formatNumber(missing, 0)} TIDAK ADA`;
+    else if (marked) text = `${formatNumber(marked, 0)} POLYGON DITANDAI`;
+    else if (missing) text = "ID TIDAK DITEMUKAN";
+    else text = "SIAP LACAK";
+
+    badge.textContent = text;
+    badge.classList.toggle("is-live", watching);
+    badge.classList.toggle("is-warn", Boolean(missing) || Boolean(state.tracker.locateError && watching));
+
+    const polygonCount = targets.reduce((sum, target) => sum + target.polygons.length, 0);
+    const parts = [];
+    if (state.tracker.data) parts.push(`${formatNumber(state.tracker.featureCount, 0)} polygon BSRE tersedia`);
+    else parts.push(state.tracker.loading ? "memuat data BSRE…" : "data BSRE belum termuat");
+    if (polygonCount) parts.push(`${formatNumber(polygonCount, 0)} ditandai`);
+    if (position) {
+      const quality = classifyGpsAccuracy(position.accuracy);
+      parts.push(`posisi ${position.lat.toFixed(5)}, ${position.lng.toFixed(5)} · ±${formatNumber(position.accuracy, 1)} m · ${quality.label}`);
+    }
+    caption.textContent = parts.join(" · ");
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Tracker: geometry helpers                                                   */
+  /* -------------------------------------------------------------------------- */
+
+  function eachGeoRing(geo, callback) {
+    if (!geo || !Array.isArray(geo.coordinates)) return;
+    if (geo.type === "Polygon") geo.coordinates.forEach((ring, ringIndex) => callback(ring, 0, ringIndex));
+    else if (geo.type === "MultiPolygon") {
+      geo.coordinates.forEach((polygon, polygonIndex) => polygon.forEach((ring, ringIndex) => callback(ring, polygonIndex, ringIndex)));
+    }
+  }
+
+  function openRing(ring) {
+    const clean = Array.isArray(ring) ? ring.slice() : [];
+    if (clean.length > 1 && positionsEqual(clean[0], clean[clean.length - 1])) clean.pop();
+    return clean;
+  }
+
+  /* [[lat,lng] rings per polygon], closing duplicates and bad numbers removed. */
+  function geometryPolys(geo) {
+    const polys = [];
+    eachGeoRing(geo, (ring, polygonIndex) => {
+      const clean = openRing(ring)
+        .filter((position) => Array.isArray(position) && Number.isFinite(position[0]) && Number.isFinite(position[1]))
+        .map(([lng, lat]) => [lat, lng]);
+      if (clean.length < 3) return;
+      if (!polys[polygonIndex]) polys[polygonIndex] = [];
+      polys[polygonIndex].push(clean);
+    });
+    return polys.filter(Boolean);
+  }
+
+  function trackerMetrics(feature) {
+    const geo = feature?.geometry;
+    if (!geo) return null;
+
+    let vertices = 0;
+    let bestRing = null;
+    let bestArea = 0;
+    let minLat = Infinity;
+    let maxLat = -Infinity;
+    let minLng = Infinity;
+    let maxLng = -Infinity;
+
+    eachGeoRing(geo, (rawRing) => {
+      const ring = openRing(rawRing).filter((position) => Array.isArray(position) && Number.isFinite(position[0]) && Number.isFinite(position[1]));
+      vertices += ring.length;
+      ring.forEach(([lng, lat]) => {
+        if (lat < minLat) minLat = lat;
+        if (lat > maxLat) maxLat = lat;
+        if (lng < minLng) minLng = lng;
+        if (lng > maxLng) maxLng = lng;
+      });
+      const area = Math.abs(shoelaceArea(ring));
+      if (area > bestArea) {
+        bestArea = area;
+        bestRing = ring;
+      }
+    });
+
+    if (!Number.isFinite(minLat) || !Number.isFinite(minLng)) return null;
+
+    return {
+      vertices,
+      bounds: L.latLngBounds([minLat, minLng], [maxLat, maxLng]),
+      center: bestRing && bestRing.length > 2 ? ringCentroid(bestRing) : [(minLat + maxLat) / 2, (minLng + maxLng) / 2]
+    };
+  }
+
+  /* ring positions are [lng, lat] */
+  function shoelaceArea(ring) {
+    let sum = 0;
+    for (let i = 0, len = ring.length; i < len; i += 1) {
+      const [x1, y1] = ring[i];
+      const [x2, y2] = ring[(i + 1) % len];
+      sum += x1 * y2 - x2 * y1;
+    }
+    return sum / 2;
+  }
+
+  function ringCentroid(ring) {
+    let area = 0;
+    let x = 0;
+    let y = 0;
+    for (let i = 0, len = ring.length; i < len; i += 1) {
+      const [x1, y1] = ring[i];
+      const [x2, y2] = ring[(i + 1) % len];
+      const cross = x1 * y2 - x2 * y1;
+      area += cross;
+      x += (x1 + x2) * cross;
+      y += (y1 + y2) * cross;
+    }
+    area /= 2;
+    if (Math.abs(area) < 1e-14) {
+      const sums = ring.reduce((acc, position) => [acc[0] + position[0], acc[1] + position[1]], [0, 0]);
+      return [sums[1] / ring.length, sums[0] / ring.length];
+    }
+    return [y / (6 * area), x / (6 * area)];
+  }
+
+  /* Even-odd rule per polygon so ring holes cancel out; OR across sub-polygons. */
+  function pointInPolys(point, polys) {
+    return polys.some((rings) => rings.reduce((inside, ring) => inside !== pointInRing(point, ring), false));
+  }
+
+  function pointInRing([lat, lng], ring) {
+    let inside = false;
+    for (let i = 0, j = ring.length - 1; i < ring.length; j = i += 1) {
+      const [latI, lngI] = ring[i];
+      const [latJ, lngJ] = ring[j];
+      if (latI > lat !== latJ > lat && lng < ((lngJ - lngI) * (lat - latI)) / (latJ - latI) + lngI) inside = !inside;
+    }
+    return inside;
+  }
+
+  function distanceToPolys(point, polys) {
+    const [lat, lng] = point;
+    const scaleY = 111320;
+    const scaleX = 111320 * Math.cos(toRadians(lat));
+    let best = Infinity;
+
+    polys.forEach((rings) => {
+      rings.forEach((ring) => {
+        for (let i = 0, len = ring.length; i < len; i += 1) {
+          const [ay, ax] = ring[i];
+          const [by, bx] = ring[(i + 1) % len];
+          const distance = distancePointSegmentMeters(lat, lng, ax, ay, bx, by, scaleX, scaleY);
+          if (distance < best) best = distance;
+        }
+      });
+    });
+
+    return Number.isFinite(best) ? best : null;
+  }
+
+  function distancePointSegmentMeters(py, px, ax, ay, bx, by, scaleX, scaleY) {
+    const pxm = px * scaleX;
+    const pym = py * scaleY;
+    const axm = ax * scaleX;
+    const aym = ay * scaleY;
+    const bxm = bx * scaleX;
+    const bym = by * scaleY;
+    const dx = bxm - axm;
+    const dy = bym - aym;
+    const lengthSq = dx * dx + dy * dy;
+    const t = lengthSq === 0 ? 0 : Math.max(0, Math.min(1, ((pxm - axm) * dx + (pym - aym) * dy) / lengthSq));
+    return Math.hypot(pxm - (axm + t * dx), pym - (aym + t * dy));
+  }
+
+  function escapeHtml(value) {
+    return String(value)
+      .replace(/&/g, "&amp;")
+      .replace(/</g, "&lt;")
+      .replace(/>/g, "&gt;")
+      .replace(/"/g, "&quot;");
   }
 
   /* -------------------------------------------------------------------------- */

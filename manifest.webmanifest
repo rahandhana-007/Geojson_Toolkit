@@ -2,17 +2,24 @@
   "id": "./",
   "name": "GeoJSON Toolkit — By AR",
   "short_name": "GeoJSON Toolkit",
-  "description": "Toolkit lapangan untuk membuat, membaca, membandingkan, mengedit, dan mengganti nama file GeoJSON langsung di perangkat.",
+  "description": "Toolkit lapangan untuk membuat, membaca, mengedit, mengganti nama, dan melacak polygon GeoJSON langsung di perangkat.",
   "lang": "id-ID",
   "dir": "ltr",
   "start_url": "./#maker",
   "scope": "./",
   "display": "standalone",
-  "display_override": ["standalone", "minimal-ui"],
+  "display_override": [
+    "standalone",
+    "minimal-ui"
+  ],
   "orientation": "any",
   "background_color": "#f2f2f2",
   "theme_color": "#111111",
-  "categories": ["utilities", "productivity", "navigation"],
+  "categories": [
+    "utilities",
+    "productivity",
+    "navigation"
+  ],
   "prefer_related_applications": false,
   "icons": [
     {
@@ -40,21 +47,52 @@
       "short_name": "Maker",
       "description": "Buat polygon dari titik GPS",
       "url": "./#maker",
-      "icons": [{ "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "assets/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "Reader",
       "short_name": "Reader",
       "description": "Baca dan edit GeoJSON",
       "url": "./#reader",
-      "icons": [{ "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "assets/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     },
     {
       "name": "Renamer",
       "short_name": "Renamer",
       "description": "Ganti nama file GeoJSON",
       "url": "./#renamer",
-      "icons": [{ "src": "assets/icons/icon-192.png", "sizes": "192x192", "type": "image/png" }]
+      "icons": [
+        {
+          "src": "assets/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
+    },
+    {
+      "name": "Tracker",
+      "short_name": "Tracker",
+      "description": "Lacak posisi polygon BSRE berdasarkan ID",
+      "url": "./#tracker",
+      "icons": [
+        {
+          "src": "assets/icons/icon-192.png",
+          "sizes": "192x192",
+          "type": "image/png"
+        }
+      ]
     }
   ]
 }

@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#111111">
-  <meta name="description" content="GeoJSON Toolkit untuk membuat, membaca, mengedit, dan mengganti nama file GeoJSON langsung di browser.">
+  <meta name="description" content="GeoJSON Toolkit untuk membuat, membaca, mengedit, mengganti nama file GeoJSON, dan melacak polygon BSRE berdasarkan ID langsung di browser.">
   <meta name="application-name" content="GeoJSON Toolkit">
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
@@ -42,6 +42,9 @@
       </button>
       <button class="nav-item" id="tab-renamer" type="button" role="tab" aria-selected="false" aria-controls="renamer" data-tab="renamer">
         <span>03</span> Renamer
+      </button>
+      <button class="nav-item" id="tab-tracker" type="button" role="tab" aria-selected="false" aria-controls="tracker" data-tab="tracker">
+        <span>04</span> Tracker
       </button>
     </nav>
 
@@ -515,6 +518,96 @@
                 <span><small>EXPORT RENAMED FILE</small>Download</span>
                 <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M12 3v12M7 10l5 5 5-5M4 21h16"/></svg>
               </button>
+            </div>
+          </article>
+        </div>
+      </div>
+    </section>
+
+    <!-- TRACKER -->
+    <section class="workspace" id="tracker" role="tabpanel" aria-labelledby="tab-tracker" tabindex="0" hidden>
+      <div class="section-heading">
+        <div>
+          <p class="eyebrow"><span>04</span> BSRE POLYGON TRACKING</p>
+          <h1>Lacak Posisi Polygon BSRE</h1>
+        </div>
+        <div class="section-state">
+          <span class="state-label">DATA</span>
+          <strong><i class="status-light"></i> <span id="trackerDataState">MEMUAT BSRE…</span></strong>
+        </div>
+      </div>
+
+      <div class="tracker-layout">
+        <aside class="tracker-sidebar">
+          <article class="panel tracker-input-panel">
+            <div class="panel-head compact">
+              <div>
+                <p class="panel-kicker">TARGET INPUT</p>
+                <h2>ID Polygon</h2>
+              </div>
+              <span class="count-badge" id="trackerTargetCount">0</span>
+            </div>
+            <label class="tracker-label" for="trackerIdInput">
+              Satu ID per baris, boleh juga dipisah koma atau spasi. Tulis ID blok tanpa akhiran (mis. <code>AC00020799</code>) untuk menandai seluruh sub-bloknya sekaligus.
+            </label>
+            <textarea class="text-input tracker-id-input" id="trackerIdInput" rows="7" spellcheck="false" autocomplete="off"
+              aria-label="Daftar ID polygon BSRE yang dilacak"
+              placeholder="AA00021551-1&#10;AC00020799&#10;AE00012345-2"></textarea>
+            <div class="tracker-input-actions">
+              <button class="button button-primary" id="trackerMarkBtn" type="button">Tandai Polygon</button>
+              <button class="button button-secondary" id="trackerClearBtn" type="button">Kosongkan</button>
+            </div>
+            <div class="tracker-flags">
+              <label class="switch-row tracker-switch">
+                <input type="checkbox" id="trackerFitToggle" checked>
+                <span class="tracker-switch-box" aria-hidden="true"></span>
+                <span><strong>Zoom otomatis ke hasil</strong><small>Peta memusat ke polygon yang baru ditandai.</small></span>
+              </label>
+            </div>
+            <div class="inline-alert" id="trackerMessage" hidden role="alert"></div>
+          </article>
+
+          <article class="panel tracker-list-panel">
+            <div class="panel-head compact">
+              <div>
+                <p class="panel-kicker">TRACKED LIST</p>
+                <h2>Polygon Terlacak</h2>
+              </div>
+              <span class="count-badge" id="trackerResultCount">0</span>
+            </div>
+            <div class="tracker-result-list" id="trackerResultList">
+              <p class="tracker-empty">Belum ada ID ditandai. Masukkan ID polygon di kolom atas lalu tekan <strong>Tandai Polygon</strong>.</p>
+            </div>
+          </article>
+        </aside>
+
+        <div class="tracker-main">
+          <article class="map-panel tracker-map-panel">
+            <div class="map-toolbar tracker-map-toolbar">
+              <div>
+                <span class="map-index">MAP / 04</span>
+                <strong>TRACKER BSRE</strong>
+              </div>
+              <div class="tracker-map-actions">
+                <span class="selection-badge" id="trackerMapStatus">SIAP LACAK</span>
+                <button class="map-tool-button tracker-context-button" id="trackerContextBtn" type="button" aria-pressed="false" title="Tampilkan seluruh polygon BSRE sebagai konteks peta">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="m12 3 8 4-8 4-8-4 8-4Z"/><path d="m4 12 8 4 8-4"/></svg>
+                  <span>Konteks BSRE</span>
+                </button>
+                <button class="map-tool-button tracker-locate-button" id="trackerLocateBtn" type="button" aria-pressed="false" title="Pantau posisi GPS saya terhadap polygon yang dilacak">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="12" cy="12" r="7"/><path d="M12 2v3M12 19v3M2 12h3M19 12h3"/><circle cx="12" cy="12" r="2"/></svg>
+                  <span class="tracker-locate-label">Posisi Saya</span>
+                </button>
+                <button class="map-tool-button" id="trackerFitBtn" type="button" disabled title="Zoom ke semua polygon yang ditandai">
+                  <svg aria-hidden="true" viewBox="0 0 24 24"><path d="M4 9V4h5M20 9V4h-5M4 15v5h5M20 15v5h-5"/></svg>
+                  <span>Zoom Semua</span>
+                </button>
+              </div>
+            </div>
+            <div class="map tracker-map" id="trackerMap" aria-label="Peta Tracker polygon BSRE"></div>
+            <div class="map-caption">
+              <span id="trackerMapCaption">POLYGON BSRE / BELUM ADA TARGET</span>
+              <p>Polygon yang ditandai tampil merah dengan nomor urut sesuai daftar input.</p>
             </div>
           </article>
         </div>

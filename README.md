@@ -1,6 +1,6 @@
 # GeoJSON Toolkit
 
-Aplikasi web statis/PWA untuk membuat, membaca/mengedit, dan mengganti nama file GeoJSON. Seluruh pemrosesan file berlangsung di browser; tidak ada upload ke backend.
+Aplikasi web statis/PWA untuk membuat, membaca/mengedit, mengganti nama file GeoJSON, serta melacak posisi polygon BSRE berdasarkan ID. Seluruh pemrosesan berlangsung di browser; tidak ada upload ke backend.
 
 ## Fitur
 
@@ -39,11 +39,25 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, dan mengganti nama file
 - Mengganti nama file dengan sanitasi otomatis.
 - Opsional menyinkronkan field `nama_lahan`, `name`, atau field custom pada properties.
 
+### Tracker
+- Modul keempat untuk melacak posisi polygon BSRE tertentu tanpa harus memuat file apa pun.
+- Satu layar peta penuh + text box daftar ID polygon; satu ID per baris (boleh juga dipisahkan koma atau spasi).
+- Pencocokan huruf besar/kecil diabaikan, ID duplikat digabungkan, dan maksimal 60 ID diproses per pencarian.
+- ID blok tanpa akhiran (mis. `AC00020799`) otomatis ditandai sebagai **BLOK** dan mengambil seluruh sub-polygonnya (`-1`, `-2`, dst.).
+- Polygon target digambar merah di atas konteks BSRE, diberi nomor urut sesuai daftar input, popup ID + luas (ha), serta tooltip saat hover.
+- Daftar "Polygon Terlacak" menampilkan status tiap ID; klik baris untuk zoom ke polygon tersebut, tombol × menghapusnya dan menyinkronkan text box.
+- ID yang tidak ditemukan ditandai merah dan menawarkan chip ID terdekat; klik chip untuk langsung memakai ID tersebut.
+- Tombol **Konteks BSRE** menampilkan seluruh 1.212 polygon BSRE sebagai latar abu-abu (tetap dapat dimatikan).
+- Tombol **Posisi Saya** memantau GPS (`watchPosition` + `enableHighAccuracy`) dan melaporkan apakah posisi berada di dalam polygon target atau jaraknya ke tepi polygon (meter/kilometer).
+- Akurasi GPS memakai label yang sama dengan Maker (Sangat Akurat/Akurat/Kurang Akurat/Bad Signal) dan ditampilkan pada caption peta.
+- Pemantauan GPS berhenti otomatis saat tab meninggalkan Tracker, dan bisa dihentikan manual lewat tombol **Berhenti Lacak**.
+- Data BSRE dibaca dari `assets/bsre.geojson` yang sudah di-cache service worker, sehingga pelacakan berdasarkan ID tetap berjalan offline (peta memakai grid koordinat).
+
 ### Progressive Web App
 - Dapat diinstal di Android sebagai aplikasi standalone.
 - App shell, Leaflet, dan file BSRE tersedia dari cache setelah kunjungan pertama.
 - Tombol **Install App** muncul otomatis ketika browser menyatakan aplikasi siap dipasang.
-- Shortcut Maker, Reader, dan Renamer tersedia dari ikon aplikasi pada Android yang mendukungnya.
+- Shortcut Maker, Reader, Renamer, dan Tracker tersedia dari ikon aplikasi pada Android yang mendukungnya; membuka shortcut cukup mengganti hash dan tab ikut berpindah.
 - Basemap OpenStreetMap tetap membutuhkan internet; proses GeoJSON lokal tetap dapat berjalan tanpa basemap.
 
 ## Instalasi di Android
@@ -107,6 +121,7 @@ Ketika perangkat tidak terhubung ke internet, aplikasi tetap bisa dipakai untuk 
 - Peta dasar OpenStreetMap tidak tersedia saat offline, sehingga aplikasi otomatis menggantinya dengan **grid koordinat (garis lintang/bujur)** agar titik & polygon tetap terlihat.
 - Indikator **OFFLINE · GRID MODE** muncul pada panel peta, dan tombol "Mode Offline · Grid" ditandai.
 - Input Koordinat Manual, penambahan titik, perhitungan luas, dan unduh GeoJSON semuanya berjalan tanpa koneksi.
+- Modul Tracker memakai `assets/bsre.geojson` dari cache service worker, sehingga pencarian ID polygon dan penandaannya tetap berfungsi offline; hanya tile peta yang bergantung pada jaringan.
 
 ## Edit Polygon (Reader · dilindungi PIN)
 Fitur untuk mengubah bentuk geometry Polygon/MultiPolygon yang telah di-load di tab **Reader** dengan menyeret titik-titiknya.
