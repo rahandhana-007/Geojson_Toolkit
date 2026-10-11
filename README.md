@@ -46,6 +46,12 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, mengganti nama file Geo
 - Tombol **Hidden BSRE** menyembunyikan overlay pembanding dan dapat ditampilkan kembali tanpa memuat ulang file.
 - Selector feature dan editor properties bertipe string, number, boolean, null, atau JSON.
 - Menyimpan edit di memory sebelum download.
+- **Luas tidak ikut berubah saat titik digeser** — `luas_hektar` di file adalah angka tersimpan, bukan hasil hitung. Sejak ini Reader menanganinya eksplisit:
+  - **Coordinate Sheet** selalu menampilkan luas bentuk *saat ini* (diperbarui tiap titik digeser).
+  - Panel property punya pengingat **"Luas property belum mengikuti bentuk baru"** yang menyebut angka lama, angka baru, dan selisihnya, dengan tombol **Perbarui Luas**.
+  - Centang **"Sinkron luas otomatis"** (bawaan aktif) agar `luas_hektar` dan `luas_m2` langsung ditulis ulang setiap kali titik digeser — hanya untuk key yang sudah ada di file, dan tetap perlu **Simpan Perubahan**/unduh untuk menyimpannya.
+  - Saat hanya membaca file (tanpa mode edit) nilai yang tidak cocok **tidak pernah diubah diam-diam**; hanya ditandai.
+  - Luas dihitung dari cincin luar **dikurangi lubang**, dan untuk MultiPolygon = jumlah seluruh polygon; sumber angkanya sama dengan yang tampil di tabel koordinat.
 
 ### Renamer
 - Validasi file sumber.

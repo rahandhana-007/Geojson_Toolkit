@@ -55,7 +55,12 @@
       coordsRound: true,
       coordsDms: false,
       coordsRenderQueued: false,
-      coordMarker: null
+      coordMarker: null,
+      areaStale: false,
+      areaAutoSync: true,
+      areaNote: "",
+      currentHa: null,
+      storedHa: null
     },
     renamer: {
       data: null,
@@ -1422,6 +1427,7 @@
     });
 
     setupReaderCoordinates();
+    setupReaderAreaSync();
     updateReaderBsreControls();
   }
 
@@ -1535,6 +1541,7 @@
       renderReaderMap(true);
       renderPropertyEditor();
       renderReaderCoordinates();
+      updateReaderAreaStatus();
       window.setTimeout(() => state.reader.map.invalidateSize(), 100);
       showToast("GeoJSON valid", `${file.name} berhasil dibuka.`, "success");
     } catch (error) {
@@ -1625,6 +1632,7 @@
     renderReaderSelection(true);
     renderPropertyEditor();
     renderReaderCoordinates();
+    updateReaderAreaStatus();
   }
 
   function renderReaderMap(fitAll = false) {
@@ -1837,6 +1845,7 @@
     updateReaderEditState();
     renderFeatureList();
     renderReaderCoordinates();
+    updateReaderAreaStatus();
     if (showSuccess) {
       setInlineMessage("readerEditorMessage", "Perubahan properties tersimpan di memory browser.", "success", false);
       showToast("Perubahan disimpan", "GeoJSON di memory telah diperbarui.", "success");
@@ -1868,6 +1877,146 @@
       }
     }
     return rawValue;
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Reader: keep stored area properties in step with an edited shape            */
+  /* -------------------------------------------------------------------------- */
+
+  /* Dragging a vertex changes geometry only; `luas_hektar` in the file is just a
+     stored number. These helpers offer (or apply) the sync explicitly. */
+  function updateReaderAreaStatus() {
+    const features = state.reader.data ? getFeatures(state.reader.data) : [];
+    const feature = features[state.reader.selectedIndex];
+    const type = feature?.geometry?.type;
+
+    if (!["Polygon", "MultiPolygon"].includes(type)) {
+      state.reader.areaStale = false;
+      state.reader.areaNote = "";
+      state.reader.currentHa = null;
+      state.reader.storedHa = null;
+      renderReaderAreaSync();
+      return;
+    }
+
+    const entry = readerFeatureCoordinates(feature, state.reader.selectedIndex);
+    const ha = Number((entry.area / 10000).toFixed(4));
+    const stored = Number(feature?.properties?.luas_hektar);
+
+    state.reader.currentHa = ha;
+    state.reader.storedHa = Number.isFinite(stored) ? stored : null;
+    state.reader.areaStale = Number.isFinite(stored) && Math.abs(stored - ha) > 0.00005;
+
+    if (state.reader.areaStale && state.reader.areaAutoSync && state.reader.editMode) {
+      applyReaderAreaSync({ silent: true });
+      return;
+    }
+
+    if (!state.reader.areaStale && Number.isFinite(stored)) state.reader.areaNote = "";
+    if (!Number.isFinite(stored)) {
+      state.reader.areaNote = `Luas bentuk ini ${formatNumber(ha, 4)} ha — file tidak punya property luas, jadi tidak ada nilai yang diubah.`;
+    }
+    renderReaderAreaSync();
+  }
+
+  function applyReaderAreaSync(options = {}) {
+    const features = getFeatures(state.reader.data);
+    const feature = features[state.reader.selectedIndex];
+    if (!feature?.properties || !feature?.geometry) return false;
+
+    const entry = readerFeatureCoordinates(feature, state.reader.selectedIndex);
+    const ha = Number((entry.area / 10000).toFixed(4));
+    const squareMeters = Number(entry.area.toFixed(2));
+    const updates = [];
+
+    if (Object.prototype.hasOwnProperty.call(feature.properties, "luas_hektar")) {
+      feature.properties.luas_hektar = ha;
+      updates.push(["luas_hektar", ha]);
+    }
+    if (Object.prototype.hasOwnProperty.call(feature.properties, "luas_m2")) {
+      feature.properties.luas_m2 = squareMeters;
+      updates.push(["luas_m2", squareMeters]);
+    }
+
+    if (!updates.length) {
+      state.reader.areaStale = false;
+      renderReaderAreaSync();
+      return false;
+    }
+
+    // Keep the visible editor rows in step without discarding other unsaved edits.
+    updates.forEach(([key, value]) => setReaderPropertyRow(key, value));
+
+    state.reader.areaStale = false;
+    state.reader.areaNote = "";
+    markReaderDirty();
+    renderReaderAreaSync();
+    renderReaderCoordinates();
+
+    if (!options.silent) {
+      showToast(
+        "Luas diperbarui",
+        `${updates.map(([key]) => key).join(" + ")} sekarang ${formatNumber(ha, 4)} ha · ${formatNumber(squareMeters, 2)} m². Tekan Simpan Perubahan bila belum.`,
+        "success"
+      );
+    }
+    return true;
+  }
+
+  function setReaderPropertyRow(key, value) {
+    const rows = $$(".property-row", el("propertyEditor"));
+    const row = rows.find((item) => item.querySelector(".property-key")?.value.trim() === key);
+    if (!row) return;
+    const input = row.querySelector(".property-value");
+    if (input) input.value = String(value);
+    const typeSelect = row.querySelector(".property-type");
+    if (typeSelect) typeSelect.value = "number";
+  }
+
+  function renderReaderAreaSync() {
+    const box = el("readerAreaSync");
+    if (!box) return;
+    const title = el("readerAreaSyncTitle");
+    const text = el("readerAreaSyncText");
+    const button = el("readerAreaSyncBtn");
+    const auto = el("readerAreaAutoChk");
+
+    auto.checked = state.reader.areaAutoSync;
+
+    if (state.reader.areaStale) {
+      box.hidden = false;
+      box.classList.add("is-stale");
+      button.hidden = false;
+      title.textContent = "Luas property belum mengikuti bentuk baru";
+      const delta = state.reader.currentHa - state.reader.storedHa;
+      text.textContent = `luas_hektar masih ${formatNumber(state.reader.storedHa, 4)} ha, bentuk sekarang ${formatNumber(state.reader.currentHa, 4)} ha (selisih ${delta >= 0 ? "+" : "−"}${formatNumber(Math.abs(delta), 4)} ha).`;
+      return;
+    }
+
+    if (state.reader.areaNote) {
+      box.hidden = false;
+      box.classList.remove("is-stale");
+      button.hidden = true;
+      title.textContent = "Luas dihitung ulang";
+      text.textContent = state.reader.areaNote;
+      return;
+    }
+
+    box.hidden = true;
+    box.classList.remove("is-stale");
+  }
+
+  function setupReaderAreaSync() {
+    el("readerAreaSyncBtn").addEventListener("click", () => {
+      if (!applyReaderAreaSync()) {
+        showToast("Tidak ada property luas", "File ini tidak punya luas_hektar atau luas_m2 untuk diperbarui.", "warning");
+      }
+    });
+    el("readerAreaAutoChk").addEventListener("change", (event) => {
+      state.reader.areaAutoSync = event.target.checked;
+      if (state.reader.areaAutoSync && state.reader.areaStale) applyReaderAreaSync({ silent: true });
+      renderReaderAreaSync();
+    });
   }
 
   function downloadReaderGeoJSON() {
@@ -1938,6 +2087,7 @@
   }
 
   function startReaderEditMode() {
+    updateReaderAreaStatus();
     const features = getFeatures(state.reader.data);
     const feature = features[state.reader.selectedIndex];
     const geo = feature?.geometry;
@@ -1992,6 +2142,7 @@
     // Rebuild the styled preview from the updated in-memory geometry.
     if (state.reader.data) renderReaderMap(false);
     renderReaderCoordinates();
+    updateReaderAreaStatus();
   }
 
   function buildEditableGeometry(geo) {
@@ -2089,6 +2240,7 @@
     state.reader.dirty = true;
     updateReaderEditState();
     scheduleReaderCoordinates();
+    updateReaderAreaStatus();
     setInlineMessage("readerEditorMessage", "", "", true);
     showToast("Bentuk diperbarui", `Titik ${vertexIndex + 1} pada polygon digeser.`, "success");
   }

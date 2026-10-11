@@ -994,6 +994,26 @@ main { min-height: calc(100vh - var(--header-h)); }
 .tracker-tooltip { color: var(--ink); background: #fff; border: 1px solid var(--ink); border-radius: 0; box-shadow: 0 3px 10px rgba(0,0,0,.2); font: 700 9px/1.35 ui-monospace, monospace; }
 .tracker-tooltip::before { display: none; }
 
+/* Reader · area sync notice */
+.property-head-right { display: flex; align-items: center; gap: 14px; }
+.area-sync {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  margin: 0 16px 12px;
+  padding: 11px 13px;
+  background: #fdf4e5;
+  border-left: 3px solid var(--amber);
+}
+.area-sync[hidden] { display: none; }
+.area-sync.is-stale { background: #fff0f1; border-left-color: var(--red); }
+.area-sync-copy { flex: 1; min-width: 0; }
+.area-sync-copy strong { display: block; font-size: 10px; letter-spacing: .01em; }
+.area-sync-copy span { display: block; margin-top: 4px; color: #6a4a12; font: 700 10px/1.45 ui-monospace, monospace; overflow-wrap: anywhere; }
+.area-sync.is-stale .area-sync-copy span { color: #8c0611; }
+.area-sync-auto { display: inline-flex; align-items: center; gap: 7px; color: var(--graphite); font-size: 9px; font-weight: 700; white-space: nowrap; cursor: pointer; }
+.area-sync-auto input { width: 14px; height: 14px; accent-color: var(--red); }
+.button-tiny { min-height: 30px; padding: 6px 11px; font-size: 9px; white-space: nowrap; }
 /* Reader · coordinate sheet */
 .reader-coord-panel { border-top: 3px solid var(--red); min-width: 0; }
 .reader-coord-panel .panel-head { padding-bottom: 13px; }
@@ -1260,6 +1280,9 @@ main { min-height: calc(100vh - var(--header-h)); }
   .coord-stats { grid-template-columns: 1fr 1fr; }
   .coord-stat:nth-child(6) { grid-column: 1 / -1; }
   .coord-stat strong { font-size: 10px; }
+  .property-head-right { width: 100%; justify-content: space-between; gap: 10px; }
+  .area-sync { flex-wrap: wrap; margin: 0 14px 12px; }
+  .area-sync .button-tiny { flex: 1; }
   .coord-table-wrap { max-height: 52vh; }
   .tracker-id-input { min-height: 118px; }
   .tracker-input-actions { flex-direction: column; }

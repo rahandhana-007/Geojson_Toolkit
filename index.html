@@ -414,7 +414,20 @@
                 <p class="panel-kicker">PARAMETER EDITOR</p>
                 <h2 id="propertyEditorTitle">Properties</h2>
               </div>
-              <div class="edit-state" id="readerEditState"><i></i> TERSIMPAN</div>
+              <div class="property-head-right">
+                <label class="area-sync-auto" title="Setiap kali titik polygon digeser, nilai property luas ikut diperbarui">
+                  <input type="checkbox" id="readerAreaAutoChk" checked>
+                  <span>Sinkron luas otomatis</span>
+                </label>
+                <div class="edit-state" id="readerEditState"><i></i> TERSIMPAN</div>
+              </div>
+            </div>
+            <div class="area-sync" id="readerAreaSync" hidden>
+              <div class="area-sync-copy">
+                <strong id="readerAreaSyncTitle">Luas property belum mengikuti bentuk baru</strong>
+                <span id="readerAreaSyncText">—</span>
+              </div>
+              <button class="button button-secondary button-tiny" id="readerAreaSyncBtn" type="button">Perbarui Luas</button>
             </div>
             <div class="property-column-labels" aria-hidden="true">
               <span>KEY</span><span>TYPE</span><span>VALUE</span><span></span>
