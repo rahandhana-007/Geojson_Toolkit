@@ -345,6 +345,40 @@
         </div>
 
         <div class="reader-main">
+          <article class="panel reader-coord-panel" id="readerCoordPanel">
+            <div class="panel-head coord-head">
+              <div>
+                <p class="panel-kicker">COORDINATE SHEET</p>
+                <h2>Koordinat Semua Polygon</h2>
+              </div>
+              <div class="coord-head-actions">
+                <span class="count-badge" id="readerCoordCount">0 TITIK</span>
+                <div class="coord-segment" role="group" aria-label="Lingkup koordinat">
+                  <button type="button" id="readerCoordScopeAll" class="is-active" aria-pressed="true">Semua</button>
+                  <button type="button" id="readerCoordScopeSelected" aria-pressed="false">Terpilih</button>
+                </div>
+              </div>
+            </div>
+
+            <div class="coord-toolbar">
+              <label class="coord-search">
+                <svg aria-hidden="true" viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.6-3.6"/></svg>
+                <span class="sr-only">Cari ID, nama, atau angka koordinat</span>
+                <input type="search" id="readerCoordSearch" placeholder="Cari ID / nama / angka koordinat…" autocomplete="off" spellcheck="false">
+              </label>
+              <button class="chip-toggle" id="readerCoordRoundBtn" type="button" aria-pressed="true" title="Bulatkan tampilan ke 6 desimal (±0,1 m). Nilai asli file tidak diubah.">6 DESIMAL</button>
+              <button class="chip-toggle" id="readerCoordDmsBtn" type="button" aria-pressed="false" title="Tampilkan derajat-menit-detik (bacaan ukur)">DMS</button>
+              <button class="chip-toggle" id="readerCoordCopyBtn" type="button" title="Salin daftar koordinat ke clipboard">Salin CSV</button>
+              <button class="chip-toggle" id="readerCoordCsvBtn" type="button" title="Unduh daftar koordinat sebagai file CSV">Unduh CSV</button>
+            </div>
+
+            <div class="coord-stats" id="readerCoordStats"></div>
+            <div class="table-wrap coord-table-wrap">
+              <table class="data-table coord-table" id="readerCoordTable"></table>
+            </div>
+            <p class="coord-note" id="readerCoordNote" hidden></p>
+          </article>
+
           <article class="map-panel reader-map-panel">
             <div class="map-toolbar reader-map-toolbar">
               <div>

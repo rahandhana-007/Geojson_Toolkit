@@ -25,6 +25,19 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, mengganti nama file Geo
 - Export `FeatureCollection` / `Polygon` dengan properties `nama_lahan`, `nama_pemilik`, `luas_hektar`, `tanggal_pembuatan`, dan `jumlah_titik`.
 
 ### Reader
+- Tampilan utama adalah **Coordinate Sheet**: daftar koordinat semua polygon terbaca langsung di layar, tanpa perlu membuka peta atau editor.
+- Dikelompokkan per feature (nomor + nama/ID + tipe + luas + keliling) lalu per cincin: `Cincin luar`, `Lubang 1`, `Poligon 2 · cincin luar`.
+- Kolom: nomor titik, Lintang, Bujur, panjang segmen dari titik sebelumnya (meter), dan keterangan (`awal`, `penutup · sama dengan titik 1`, `tinggi … m` untuk geometry 3D).
+- Baris titik penutup tetap ditampilkan (abu-abu, bergaris coret) agar jelas bahwa cincin tertutup, bukan dihitung sebagai titik baru.
+- Strip ringkasan: jumlah fitur, jumlah polygon, total titik unik, **luas terhitung (ha)**, total keliling, rentang lintang/bujur, dan satuan (WGS84 · decimal degrees).
+- **Lubang (inner ring) mengurangi luas**, jadi angka ha sesuai geometri sebenarnya.
+- Tombol **6 DESIMAL / PRESISI PENUH** untuk berpindah antara bacaan rapi dan angka persis seperti di file; **DMS** menambah kolom derajat-menit-detik (LU/LS/BT/BU) untuk bacaan ukur.
+- Kotak pencarian menyaring berdasarkan ID, nama feature, atau digit koordinat (mis. `98.671`), dengan catatan berapa titik disembunyikan filter.
+- Lingkup **Semua / Terpilih** untuk menampilkan seluruh file atau hanya feature yang sedang dipilih.
+- **Salin CSV** ke clipboard dan **Unduh CSV** (`namaberkas_koordinat.csv`); tiap baris grup punya **Salin** untuk menyalin `lintang, bujur` satu feature saja.
+- Klik baris koordinat = menggeser peta ke titik itu dan membuka popup-nya; tombol **Lihat** pada grup memilih sekaligus men-zoom feature tersebut.
+- Saat titik polygon digeser (mode Edit Polygon), tabel koordinat ikut diperbarui seketika.
+- File besar diringkas sampai 1.500 baris demi kenyamanan baca, dengan petunjuk memakai Unduh CSV untuk daftar lengkap (CSV selalu berisi seluruh titik).
 - Upload lewat drag-and-drop atau file picker.
 - Validasi root, feature, geometry, rentang koordinat, dan linear ring.
 - Mendukung Point, MultiPoint, LineString, MultiLineString, Polygon, MultiPolygon, dan GeometryCollection.

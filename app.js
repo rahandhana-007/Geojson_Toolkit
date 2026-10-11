@@ -6,6 +6,7 @@
   const EARTH_RADIUS = 6371008.8;
   const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
   const READER_EDIT_PIN = "663322";
+  const READER_COORD_CAP = 1500;
   const TAB_NAMES = ["maker", "reader", "renamer", "tracker"];
   const TRACKER_MAX_TARGETS = 60;
   const TRACKER_ROUTE_API = "https://router.project-osrm.org/route/v1/driving";
@@ -48,7 +49,13 @@
       bsreVisible: false,
       editUnlocked: false,
       editMode: false,
-      editState: null
+      editState: null,
+      coordsScope: "all",
+      coordsQuery: "",
+      coordsRound: true,
+      coordsDms: false,
+      coordsRenderQueued: false,
+      coordMarker: null
     },
     renamer: {
       data: null,
@@ -1414,6 +1421,7 @@
       if (event.target === el("pinModal")) closePinModal();
     });
 
+    setupReaderCoordinates();
     updateReaderBsreControls();
   }
 
@@ -1526,6 +1534,7 @@
       renderFeatureList();
       renderReaderMap(true);
       renderPropertyEditor();
+      renderReaderCoordinates();
       window.setTimeout(() => state.reader.map.invalidateSize(), 100);
       showToast("GeoJSON valid", `${file.name} berhasil dibuka.`, "success");
     } catch (error) {
@@ -1615,6 +1624,7 @@
     renderFeatureList();
     renderReaderSelection(true);
     renderPropertyEditor();
+    renderReaderCoordinates();
   }
 
   function renderReaderMap(fitAll = false) {
@@ -1826,6 +1836,7 @@
     state.reader.dirty = false;
     updateReaderEditState();
     renderFeatureList();
+    renderReaderCoordinates();
     if (showSuccess) {
       setInlineMessage("readerEditorMessage", "Perubahan properties tersimpan di memory browser.", "success", false);
       showToast("Perubahan disimpan", "GeoJSON di memory telah diperbarui.", "success");
@@ -1980,6 +1991,7 @@
 
     // Rebuild the styled preview from the updated in-memory geometry.
     if (state.reader.data) renderReaderMap(false);
+    renderReaderCoordinates();
   }
 
   function buildEditableGeometry(geo) {
@@ -2076,6 +2088,7 @@
 
     state.reader.dirty = true;
     updateReaderEditState();
+    scheduleReaderCoordinates();
     setInlineMessage("readerEditorMessage", "", "", true);
     showToast("Bentuk diperbarui", `Titik ${vertexIndex + 1} pada polygon digeser.`, "success");
   }
@@ -2096,6 +2109,549 @@
     } catch (_e) {
       /* ignore */
     }
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Reader: coordinate sheet                                                    */
+  /* -------------------------------------------------------------------------- */
+
+  function setupReaderCoordinates() {
+    el("readerCoordScopeAll").addEventListener("click", () => setReaderCoordScope("all"));
+    el("readerCoordScopeSelected").addEventListener("click", () => setReaderCoordScope("selected"));
+    el("readerCoordRoundBtn").addEventListener("click", () => {
+      state.reader.coordsRound = !state.reader.coordsRound;
+      syncReaderCoordToggles();
+      renderReaderCoordinates();
+    });
+    el("readerCoordDmsBtn").addEventListener("click", () => {
+      state.reader.coordsDms = !state.reader.coordsDms;
+      syncReaderCoordToggles();
+      renderReaderCoordinates();
+    });
+    el("readerCoordSearch").addEventListener("input", (event) => {
+      state.reader.coordsQuery = event.target.value.trim().toLowerCase();
+      scheduleReaderCoordinates();
+    });
+    el("readerCoordSearch").addEventListener("search", (event) => {
+      state.reader.coordsQuery = event.target.value.trim().toLowerCase();
+      scheduleReaderCoordinates();
+    });
+    el("readerCoordCopyBtn").addEventListener("click", async () => {
+      const csv = buildReaderCoordinatesCsv();
+      if (!csv) {
+        showToast("Tidak ada koordinat", "Muat file GeoJSON yang berisi geometry terlebih dahulu.", "warning");
+        return;
+      }
+      const copied = await copyTextToClipboard(csv);
+      showToast(copied ? "Koordinat disalin" : "Penyalinan diblokir browser", copied ? `${csv.split("\n").length - 1} baris siap ditempel.` : "Gunakan tombol Unduh CSV sebagai gantinya.", copied ? "success" : "error");
+    });
+    el("readerCoordCsvBtn").addEventListener("click", () => {
+      const csv = buildReaderCoordinatesCsv();
+      if (!csv) {
+        showToast("Tidak ada koordinat", "Muat file GeoJSON yang berisi geometry terlebih dahulu.", "warning");
+        return;
+      }
+      const base = strictSlug(stripJsonExtension(el("readerDownloadName").value.trim())) || "koordinat";
+      downloadTextFile(`${base}_koordinat.csv`, csv, "text/csv;charset=utf-8");
+      showToast("CSV diunduh", `${formatNumber(csv.split("\n").length - 1, 0)} baris koordinat tersimpan sebagai file CSV.`, "success");
+    });
+
+    el("readerCoordTable").addEventListener("click", (event) => {
+      const action = event.target.closest("button[data-coord-action]");
+      if (action) {
+        const index = Number(action.dataset.index);
+        if (action.dataset.coordAction === "zoom") {
+          selectReaderFeature(index);
+          fitReaderFeature(index);
+        }
+        else if (action.dataset.coordAction === "copy") void copyReaderFeatureCoordinates(index);
+        return;
+      }
+      const row = event.target.closest("tr[data-coord-row]");
+      if (row) focusReaderCoordinate(Number(row.dataset.feature), Number(row.dataset.group), Number(row.dataset.point));
+    });
+
+    syncReaderCoordToggles();
+  }
+
+  function setReaderCoordScope(scope) {
+    state.reader.coordsScope = scope;
+    syncReaderCoordToggles();
+    renderReaderCoordinates();
+  }
+
+  function syncReaderCoordToggles() {
+    const isAll = state.reader.coordsScope === "all";
+    const allButton = el("readerCoordScopeAll");
+    const selectedButton = el("readerCoordScopeSelected");
+    allButton.classList.toggle("is-active", isAll);
+    allButton.setAttribute("aria-pressed", String(isAll));
+    selectedButton.classList.toggle("is-active", !isAll);
+    selectedButton.setAttribute("aria-pressed", String(!isAll));
+
+    const roundButton = el("readerCoordRoundBtn");
+    roundButton.classList.toggle("is-active", state.reader.coordsRound);
+    roundButton.setAttribute("aria-pressed", String(state.reader.coordsRound));
+    roundButton.textContent = state.reader.coordsRound ? "6 DESIMAL" : "PRESISI PENUH";
+    roundButton.title = state.reader.coordsRound
+      ? "Dibulatkan ke 6 desimal (±0,1 m). Klik untuk menampilkan angka persis seperti di file."
+      : "Menampilkan nilai persis dari file. Klik untuk membulatkan ke 6 desimal.";
+
+    const dmsButton = el("readerCoordDmsBtn");
+    dmsButton.classList.toggle("is-active", state.reader.coordsDms);
+    dmsButton.setAttribute("aria-pressed", String(state.reader.coordsDms));
+  }
+
+  /* Coalesce the many renders a vertex drag produces into one per frame. */
+  function scheduleReaderCoordinates() {
+    if (state.reader.coordsRenderQueued) return;
+    state.reader.coordsRenderQueued = true;
+    window.requestAnimationFrame(() => {
+      state.reader.coordsRenderQueued = false;
+      renderReaderCoordinates();
+    });
+  }
+
+  /* One flat list of rings for every geometry type, with survey-style labels. */
+  function readerGeometryRings(geometry) {
+    const rings = [];
+    const push = (positions, label, kind) => rings.push({ label, kind, positions: Array.isArray(positions) ? positions : [] });
+
+    if (!geometry || typeof geometry !== "object") return rings;
+
+    switch (geometry.type) {
+      case "Polygon":
+        (geometry.coordinates || []).forEach((ring, index) => push(ring, index === 0 ? "Cincin luar" : `Lubang ${index}`, index === 0 ? "outer" : "hole"));
+        break;
+      case "MultiPolygon": {
+        const polys = geometry.coordinates || [];
+        polys.forEach((poly, polyIndex) => poly.forEach((ring, ringIndex) => {
+          const suffix = ringIndex === 0 ? "cincin luar" : `lubang ${ringIndex}`;
+          push(ring, polys.length > 1 ? `Poligon ${polyIndex + 1} · ${suffix}` : suffix, ringIndex === 0 ? "outer" : "hole");
+        }));
+        break;
+      }
+      case "LineString":
+        push(geometry.coordinates, "Garis", "line");
+        break;
+      case "MultiLineString":
+        (geometry.coordinates || []).forEach((line, index) => push(line, `Garis ${index + 1}`, "line"));
+        break;
+      case "Point":
+        push([geometry.coordinates], "Titik", "point");
+        break;
+      case "MultiPoint":
+        push(geometry.coordinates, "Kumpulan titik", "point");
+        break;
+      case "GeometryCollection":
+        (geometry.geometries || []).forEach((child, index) => {
+          readerGeometryRings(child).forEach((ring) => push(ring.positions, `${index + 1}. ${ring.label}`, ring.kind));
+        });
+        break;
+      default:
+        break;
+    }
+
+    return rings;
+  }
+
+  function readerFeatureCoordinates(feature, index) {
+    const rings = readerGeometryRings(feature?.geometry);
+    let uniquePoints = 0;
+    let area = 0;
+    let perimeter = 0;
+
+    const groups = rings.map((ring) => {
+      const raw = ring.positions
+        .filter((position) => Array.isArray(position) && Number.isFinite(position[0]) && Number.isFinite(position[1]))
+        .map((position) => ({ lat: position[1], lng: position[0], alt: Number.isFinite(position[2]) ? position[2] : null }));
+
+      const isRing = ring.kind === "outer" || ring.kind === "hole";
+      const closed = isRing && raw.length > 3 && ring.positions.length > 1 && positionsEqual(ring.positions[0], ring.positions[ring.positions.length - 1]);
+      const unique = closed ? raw.slice(0, -1) : raw;
+      uniquePoints += unique.length;
+
+      const shape = unique.length > 2 ? calculatePerimeter(unique) : 0;
+      const size = isRing && unique.length > 2 ? calculateSphericalArea(unique) : 0;
+      // Holes subtract from the polygon area; only the outer ring bounds it.
+      if (ring.kind === "outer") {
+        area += size;
+        perimeter += shape;
+      } else if (ring.kind === "hole") {
+        area -= size;
+      }
+      const signedArea = size;
+
+      const rows = raw.map((point, position) => ({
+        lat: point.lat,
+        lng: point.lng,
+        alt: point.alt,
+        segment: position > 0 ? haversineDistance(raw[position - 1], point) : null,
+        closing: closed && position === raw.length - 1
+      }));
+
+      return { label: ring.label, kind: ring.kind, rows, unique: unique.length, closed, area: signedArea, perimeter: shape };
+    });
+
+    return {
+      featureIndex: index,
+      name: getFeatureName(feature, index),
+      type: feature?.geometry?.type || "Null geometry",
+      groups,
+      pointCount: uniquePoints,
+      area,
+      perimeter
+    };
+  }
+
+  function collectReaderCoordinates() {
+    const features = state.reader.data ? getFeatures(state.reader.data) : [];
+    let entries = features.map(readerFeatureCoordinates).filter((entry) => entry.groups.some((group) => group.rows.length));
+    if (state.reader.coordsScope === "selected") {
+      entries = entries.filter((entry) => entry.featureIndex === state.reader.selectedIndex);
+    }
+
+    const query = state.reader.coordsQuery;
+    if (query) {
+      entries = entries
+        .map((entry) => {
+          const nameHit = entry.name.toLowerCase().includes(query) || entry.type.toLowerCase().includes(query);
+          const groups = entry.groups
+            .map((group) => {
+              if (nameHit) return { ...group, filteredOut: 0 };
+              const rows = group.rows.filter((row) => readerRowMatchesQuery(row, query));
+              return { ...group, rows, filteredOut: group.rows.length - rows.length };
+            })
+            .filter((group) => group.rows.length);
+          return { ...entry, groups, pointCount: groups.reduce((sum, group) => sum + group.rows.length, 0) };
+        })
+        .filter((entry) => entry.groups.length);
+    }
+
+    return entries;
+  }
+
+  function readerRowMatchesQuery(row, query) {
+    const digits = query.replace(/[^0-9.,-]/g, "");
+    if (!digits) return false;
+    return [row.lat, row.lng].some((value) => {
+      const plain = String(value);
+      const rounded = value.toFixed(7);
+      return plain.includes(digits) || rounded.includes(digits) || rounded.replace(".", ",").includes(digits);
+    });
+  }
+
+  function renderReaderCoordinates() {
+    const table = el("readerCoordTable");
+    const entries = collectReaderCoordinates();
+    const columns = state.reader.coordsDms ? 7 : 5;
+
+    const totals = entries.reduce((acc, entry) => {
+      acc.points += entry.pointCount;
+      acc.area += entry.area;
+      acc.perimeter += entry.perimeter;
+      acc.polygons += entry.groups.some((group) => group.kind === "outer") ? 1 : 0;
+      acc.bands.push(...entry.groups.flatMap((group) => group.rows.map((row) => row.lat)));
+      acc.bujur.push(...entry.groups.flatMap((group) => group.rows.map((row) => row.lng)));
+      return acc;
+    }, { points: 0, area: 0, perimeter: 0, polygons: 0, bands: [], bujur: [] });
+
+    const features = state.reader.data ? getFeatures(state.reader.data) : [];
+    el("readerCoordCount").textContent = `${formatNumber(totals.points, 0)} TITIK`;
+
+    const stats = el("readerCoordStats");
+    stats.replaceChildren();
+    const addStat = (label, value) => {
+      const box = document.createElement("div");
+      box.className = "coord-stat";
+      const name = document.createElement("small");
+      name.textContent = label;
+      const strong = document.createElement("strong");
+      strong.textContent = value;
+      box.append(name, strong);
+      stats.append(box);
+    };
+    addStat("Fitur terbaca", `${formatNumber(entries.length, 0)}${entries.length !== features.length ? ` / ${formatNumber(features.length, 0)}` : ""}`);
+    addStat("Polygon", `${formatNumber(totals.polygons, 0)}`);
+    addStat("Total titik", formatNumber(totals.points, 0));
+    addStat("Luas terhitung", totals.area ? `${formatNumber(totals.area / 10000, 4)} ha` : "—");
+    addStat("Keliling", totals.perimeter ? formatReaderLength(totals.perimeter) : "—");
+    addStat("Rentang", totals.bands.length
+      ? `${formatReaderCoord(Math.min(...totals.bands))} – ${formatReaderCoord(Math.max(...totals.bands))} LU · ${formatReaderCoord(Math.min(...totals.bujur))} – ${formatReaderCoord(Math.max(...totals.bujur))} BT`
+      : "—");
+    addStat("Sistem", "WGS84 · DD");
+
+    const headerCells = ["Titik", "Lintang", "Bujur"];
+    if (state.reader.coordsDms) headerCells.push("Lintang DMS", "Bujur DMS");
+    headerCells.push("Segmen", "Keterangan");
+
+    const thead = document.createElement("thead");
+    thead.innerHTML = `<tr>${headerCells.map((label) => `<th scope="col">${label}</th>`).join("")}</tr>`;
+
+    const tbody = document.createElement("tbody");
+    let rendered = 0;
+    let skipped = 0;
+    let currentScope = state.reader.coordsScope;
+
+    entries.forEach((entry) => {
+      const groupCount = entry.groups.filter((group) => group.rows.length).length;
+      if (groupCount === 0) return;
+
+      const meta = [
+        entry.type,
+        `${formatNumber(entry.pointCount, 0)} titik`,
+        entry.groups.length > 1 ? `${groupCount} cincin` : null,
+        entry.area ? `${formatNumber(entry.area / 10000, 4)} ha` : null,
+        entry.perimeter ? `keliling ${formatReaderLength(entry.perimeter)}` : null
+      ].filter(Boolean).join(" · ");
+
+      const groupRow = document.createElement("tr");
+      groupRow.className = "coord-group";
+      groupRow.innerHTML = `<th scope="colgroup" colspan="${columns}">
+        <span class="coord-group-id"><i>${String(entry.featureIndex + 1).padStart(2, "0")}</i>${escapeHtml(entry.name)}</span>
+        <span class="coord-group-meta">${escapeHtml(meta)}</span>
+        <span class="coord-group-actions">
+          <button type="button" class="coord-mini" data-coord-action="zoom" data-index="${entry.featureIndex}" title="Pilih dan zoom ke feature ini">Lihat</button>
+          <button type="button" class="coord-mini" data-coord-action="copy" data-index="${entry.featureIndex}" title="Salin daftar koordinat feature ini">Salin</button>
+        </span>
+      </th>`;
+      tbody.append(groupRow);
+
+      entry.groups.forEach((group, groupIndex) => {
+        if (!group.rows.length) return;
+        if (rendered >= READER_COORD_CAP) {
+          skipped += group.rows.length;
+          return;
+        }
+
+        const ringRow = document.createElement("tr");
+        ringRow.className = "coord-ring";
+        const ringMeta = [
+          `${formatNumber(group.unique, 0)} titik unik`,
+          group.kind === "hole" ? "lubang · mengurangi luas" : null,
+          group.closed ? "cincin tertutup" : null,
+          group.area ? `${group.kind === "hole" ? "−" : ""}${formatNumber(Math.abs(group.area) / 10000, 4)} ha` : null,
+          group.perimeter ? `keliling ${formatReaderLength(group.perimeter)}` : null,
+          group.filteredOut ? `${formatNumber(group.filteredOut, 0)} titik disembunyikan filter` : null
+        ].filter(Boolean).join(" · ");
+        ringRow.innerHTML = `<td colspan="${columns}"><b>${escapeHtml(group.label)}</b><span>${escapeHtml(ringMeta)}</span></td>`;
+        tbody.append(ringRow);
+
+        for (let pointIndex = 0; pointIndex < group.rows.length; pointIndex += 1) {
+          if (rendered >= READER_COORD_CAP) {
+            skipped += group.rows.length - pointIndex;
+            break;
+          }
+          const row = group.rows[pointIndex];
+          rendered += 1;
+          const tr = document.createElement("tr");
+          tr.className = `coord-row${row.closing ? " is-closing" : ""}`;
+          tr.dataset.feature = String(entry.featureIndex);
+          tr.dataset.group = String(groupIndex);
+          tr.dataset.point = String(pointIndex);
+          tr.dataset.coordRow = "true";
+          tr.tabIndex = 0;
+
+          const notes = [];
+          if (pointIndex === 0) notes.push("awal");
+          if (row.closing) notes.push("penutup · sama dengan titik 1");
+          if (Number.isFinite(row.alt)) notes.push(`tinggi ${formatNumber(row.alt, 1)} m`);
+
+          const cells = [
+            `<td class="coord-num"><span>${pointIndex + 1}</span></td>`,
+            `<td class="coord-val">${formatReaderCoord(row.lat)}</td>`,
+            `<td class="coord-val">${formatReaderCoord(row.lng)}</td>`
+          ];
+          if (state.reader.coordsDms) {
+            cells.push(`<td class="coord-dms">${readerDms(row.lat, "lat")}</td>`);
+            cells.push(`<td class="coord-dms">${readerDms(row.lng, "lng")}</td>`);
+          }
+          cells.push(`<td class="coord-val coord-seg">${row.segment === null ? "—" : formatReaderLength(row.segment)}</td>`);
+          cells.push(`<td class="coord-note-cell">${notes.length ? escapeHtml(notes.join(" · ")) : ""}</td>`);
+          tr.innerHTML = cells.join("");
+          tbody.append(tr);
+        }
+      });
+    });
+
+    table.replaceChildren(thead, tbody);
+
+    const note = el("readerCoordNote");
+    const messages = [];
+    if (skipped > 0) messages.push(`Menampilkan ${formatNumber(rendered, 0)} titik pertama dari ${formatNumber(rendered + skipped, 0)} — tekan Unduh CSV untuk daftar lengkap.`);
+    if (!entries.length) messages.push(features.length ? "Tidak ada koordinat yang cocok dengan filter/lingkup ini." : "Muat file GeoJSON untuk melihat koordinatnya di sini.");
+    if (currentScope === "selected" && entries.length === 1) messages.push("Lingkup: hanya feature terpilih.");
+    if (!state.reader.coordsRound && entries.length) messages.push("Presisi penuh: angka persis seperti tersimpan di file.");
+    note.hidden = !messages.length;
+    note.textContent = messages.join(" ");
+
+    el("readerCoordPanel").classList.toggle("is-empty", !entries.length);
+  }
+
+  function formatReaderCoord(value) {
+    if (!Number.isFinite(value)) return "—";
+    return state.reader.coordsRound ? value.toFixed(6) : String(value);
+  }
+
+  function formatReaderLength(meters) {
+    if (!Number.isFinite(meters)) return "—";
+    if (meters < 1000) return `${formatNumber(meters, 2)} m`;
+    return `${formatNumber(meters / 1000, 3)} km`;
+  }
+
+  /* Degrees / minutes / seconds with Indonesian hemisphere labels (LU LS BT BU). */
+  function readerDms(value, axis) {
+    if (!Number.isFinite(value)) return "—";
+    let abs = Math.abs(value);
+    let degrees = Math.floor(abs);
+    let minutes = Math.floor((abs - degrees) * 60);
+    let seconds = Math.round(((abs - degrees) * 3600) - minutes * 60);
+    if (seconds >= 60) { seconds = 0; minutes += 1; }
+    if (minutes >= 60) { minutes = 0; degrees += 1; }
+    const hemisphere = axis === "lat" ? (value >= 0 ? "LU" : "LS") : (value >= 0 ? "BT" : "BU");
+    return `${degrees}° ${String(minutes).padStart(2, "0")}′ ${String(Math.min(59, seconds)).padStart(2, "0")}″ ${hemisphere}`;
+  }
+
+  function readerCoordinatesMatrix(entries) {
+    const rows = [["fitur", "tipe_geometry", "cincin", "titik", "lintang", "bujur", "tinggi_m", "semen_m", "keterangan"]];
+    entries.forEach((entry) => {
+      entry.groups.forEach((group) => {
+        group.rows.forEach((row, index) => {
+          const notes = [];
+          if (index === 0) notes.push("awal");
+          if (row.closing) notes.push("penutup");
+          rows.push([
+            entry.name,
+            entry.type,
+            group.label,
+            String(index + 1),
+            String(row.lat),
+            String(row.lng),
+            Number.isFinite(row.alt) ? String(row.alt) : "",
+            row.segment === null ? "" : row.segment.toFixed(2),
+            notes.join(" ")
+          ]);
+        });
+      });
+    });
+    return rows;
+  }
+
+  function visibleReaderCoordinates() {
+    return collectReaderCoordinates();
+  }
+
+  function buildReaderCoordinatesCsv() {
+    const rows = readerCoordinatesMatrix(visibleReaderCoordinates());
+    if (rows.length <= 1) return "";
+    return rows.map((row) => row.map((cell) => (/[",\n]/.test(cell) ? `"${cell.replace(/"/g, '""')}"` : cell)).join(",")).join("\n");
+  }
+
+  function buildReaderFeatureCoordinates(index) {
+    const features = state.reader.data ? getFeatures(state.reader.data) : [];
+    const entry = readerFeatureCoordinates(features[index], index);
+    if (!entry) return "";
+    const lines = [];
+    entry.groups.forEach((group) => {
+      group.rows.forEach((row) => lines.push(`${row.lat}, ${row.lng}`));
+    });
+    return lines.join("\n");
+  }
+
+  async function copyReaderFeatureCoordinates(index) {
+    const text = buildReaderFeatureCoordinates(index);
+    if (!text) {
+      showToast("Tidak ada koordinat", "Feature ini tidak memiliki koordinat yang valid.", "warning");
+      return;
+    }
+    const copied = await copyTextToClipboard(text);
+    showToast(
+      copied ? "Koordinat disalin" : "Penyalinan diblokir browser",
+      copied ? `${formatNumber(text.split("\n").length, 0)} baris "lintang, bujur" siap ditempel.` : "Salin manual dari tabel, atau gunakan Unduh CSV.",
+      copied ? "success" : "error"
+    );
+  }
+
+  async function copyTextToClipboard(text) {
+    try {
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        await navigator.clipboard.writeText(text);
+        return true;
+      }
+    } catch (_error) {
+      // Falls through to the legacy path below.
+    }
+    const area = document.createElement("textarea");
+    area.value = text;
+    area.setAttribute("readonly", "");
+    area.className = "sr-only";
+    document.body.append(area);
+    area.select();
+    let copied = false;
+    try {
+      copied = document.execCommand("copy");
+    } catch (_error) {
+      copied = false;
+    }
+    area.remove();
+    return copied;
+  }
+
+  function downloadTextFile(filename, text, mime) {
+    const blob = new Blob([text], { type: mime });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = filename;
+    document.body.append(anchor);
+    anchor.click();
+    anchor.remove();
+    window.setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }
+
+  function fitReaderFeature(index) {
+    const features = state.reader.data ? getFeatures(state.reader.data) : [];
+    const feature = features[index];
+    if (!feature?.geometry) return;
+    const temp = L.geoJSON(feature);
+    if (!fitLeafletLayer(state.reader.map, temp, 18)) state.reader.map.setView(DEFAULT_CENTER, DEFAULT_ZOOM);
+    temp.remove();
+  }
+
+  /* Row click: show that vertex on the map without losing the current edit state. */
+  function focusReaderCoordinate(featureIndex, groupIndex, pointIndex) {
+    const features = state.reader.data ? getFeatures(state.reader.data) : [];
+    const entry = readerFeatureCoordinates(features[featureIndex], featureIndex);
+    const row = entry?.groups?.[groupIndex]?.rows?.[pointIndex];
+    if (!row) return;
+
+    const map = state.reader.map;
+    if (state.reader.selectedIndex !== featureIndex && !state.reader.dirty && !state.reader.editMode) {
+      state.reader.selectedIndex = featureIndex;
+      renderFeatureList();
+      renderReaderSelection(false);
+      renderPropertyEditor();
+    }
+
+    map.panTo([row.lat, row.lng], { animate: true });
+    if (state.reader.coordMarker) map.removeLayer(state.reader.coordMarker);
+    state.reader.coordMarker = L.circleMarker([row.lat, row.lng], {
+      radius: 9,
+      color: "#111111",
+      weight: 3,
+      fillColor: "#e60012",
+      fillOpacity: 1
+    })
+      .bindPopup(`<div class="map-popup"><strong>Titik ${pointIndex + 1} · ${escapeHtml(entry.name)}</strong><code>${row.lat}, ${row.lng}</code><small>${escapeHtml(entry.groups[groupIndex].label)}</small></div>`)
+      .addTo(map)
+      .openPopup();
+
+    state.reader.map.once("popupclose", () => {
+      if (state.reader.coordMarker) {
+        map.removeLayer(state.reader.coordMarker);
+        state.reader.coordMarker = null;
+      }
+    });
   }
 
   /* -------------------------------------------------------------------------- */
