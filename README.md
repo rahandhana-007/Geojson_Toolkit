@@ -46,6 +46,13 @@ Aplikasi web statis/PWA untuk membuat, membaca/mengedit, mengganti nama file Geo
 - Tombol **Hidden BSRE** menyembunyikan overlay pembanding dan dapat ditampilkan kembali tanpa memuat ulang file.
 - Selector feature dan editor properties bertipe string, number, boolean, null, atau JSON.
 - Menyimpan edit di memory sebelum download.
+- **Polygon terpilih berwarna biru terang** (`#3fc8ff` garis + is biru muda di atas halo gelap), sedangkan seluruh data file tetap hijau terang. Polygon terpilih juga bisa dipilih dengan **mengetuknya langsung di peta** atau **mengklik label namanya**.
+- **Nama polygon di peta** — tombol **`Nama`** di toolbar peta (default aktif) menampilkan label `NAMA LAHAN` di titik tengah setiap polygon yang sedang terlihat:
+  - label otomatis **disembunyikan kalau bertumpuk** (yang terbesar dan yang terpilih menang) — jadi file 600–1200 polygon tetap nyaman dilihat; jumlah yang tampil dan yang disembunyikan terlihat di badge tombol,
+  - pada zoom ≥ 14 label ikut menampilkan **luas (ha)** hasil hitung ulang; di zoom jauh angka itu hilang sendiri supaya peta bersih,
+  - klik label = pilih polygon itu; selama mode Edit Polygon label jadi pasif (tidak menutupi pegangan titik) dan redup,
+  - overlay BSRE (Compare) sengaja tidak diberi label.
+- **Peta ikut mengukur ulang saat file pertama dibuka** — dulu ukuran panel masih 0×0 saat `fitBounds` dijalankan, sehingga sebagian polygon tersembunyi di luar layar. Sekarang ukuran peta disegarkan sebelum fitting.
 - **Luas tidak ikut berubah saat titik digeser** — `luas_hektar` di file adalah angka tersimpan, bukan hasil hitung. Sejak ini Reader menanganinya eksplisit:
   - **Coordinate Sheet** selalu menampilkan luas bentuk *saat ini* (diperbarui tiap titik digeser).
   - Panel property punya pengingat **"Luas property belum mengikuti bentuk baru"** yang menyebut angka lama, angka baru, dan selisihnya, dengan tombol **Perbarui Luas**.

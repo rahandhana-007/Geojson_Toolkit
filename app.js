@@ -7,6 +7,27 @@
   const MAX_UPLOAD_BYTES = 30 * 1024 * 1024;
   const READER_EDIT_PIN = "663322";
   const READER_COORD_CAP = 1500;
+  const READER_LABEL_CAP = 260;
+  const READER_LABEL_SCAN_CAP = 4000;
+  // Selection is bright blue so it reads instantly against the bright-green dataset.
+  const READER_SELECTED_STYLE = {
+    color: "#3fc8ff",
+    weight: 4.5,
+    opacity: 1,
+    fillColor: "#1ea8f0",
+    fillOpacity: 0.3,
+    className: "reader-selected-path"
+  };
+  // A cheap halo (one extra stroked path) instead of a CSS filter: filters on a
+  // path that is redrawn per drag frame cost whole seconds on a phone.
+  const READER_SELECTED_HALO = {
+    color: "#0b3a52",
+    weight: 9,
+    opacity: 0.42,
+    fill: false,
+    className: "reader-selected-halo"
+  };
+  const READER_SELECTED_MARKER = { radius: 9, color: "#03202f", weight: 3, fillColor: "#3fc8ff", fillOpacity: 1 };
   const TAB_NAMES = ["maker", "reader", "renamer", "tracker"];
   const TRACKER_MAX_TARGETS = 60;
   const TRACKER_ROUTE_API = "https://router.project-osrm.org/route/v1/driving";
@@ -44,6 +65,7 @@
       map: null,
       allLayer: null,
       selectedLayer: null,
+      selectedHaloLayer: null,
       bsreLayer: null,
       bsreLoading: false,
       bsreVisible: false,
@@ -60,7 +82,14 @@
       areaAutoSync: true,
       areaNote: "",
       currentHa: null,
-      storedHa: null
+      storedHa: null,
+      showLabels: true,
+      labelLayer: null,
+      labelQueued: false,
+      labelCount: 0,
+      labelHidden: 0,
+      areaCache: new Map(),
+      svgRenderer: null
     },
     renamer: {
       data: null,
@@ -286,6 +315,10 @@
     const readerBsrePane = state.reader.map.createPane("readerBsrePane");
     readerBsrePane.style.zIndex = "390";
     readerBsrePane.style.pointerEvents = "none";
+    // Below the marker pane (600) on purpose: the vertex handles of Edit Polygon
+    // must always stay on top of the names, never underneath them.
+    const readerLabelPane = state.reader.map.createPane("readerLabelPane");
+    readerLabelPane.style.zIndex = "450";
 
     state.tracker.map = createMap("trackerMap");
     const trackerContextPane = state.tracker.map.createPane("trackerContextPane");
@@ -1410,6 +1443,7 @@
     el("downloadReaderBtn").addEventListener("click", downloadReaderGeoJSON);
 
     el("readerEditUnlockBtn").addEventListener("click", openPinModal);
+    setupReaderLabels();
     el("readerEditPolygonBtn").addEventListener("click", toggleReaderEditMode);
     el("pinConfirmBtn").addEventListener("click", submitPin);
     el("pinCancelBtn").addEventListener("click", closePinModal);
@@ -1529,6 +1563,7 @@
       state.reader.file = file;
       state.reader.selectedIndex = getFeatures(data).length ? 0 : -1;
       state.reader.dirty = false;
+      state.reader.areaCache = new Map();
 
       el("readerDropZone").hidden = true;
       el("readerWorkspace").hidden = false;
@@ -1542,8 +1577,11 @@
       renderPropertyEditor();
       renderReaderCoordinates();
       updateReaderAreaStatus();
-      window.setTimeout(() => state.reader.map.invalidateSize(), 100);
-      showToast("GeoJSON valid", `${file.name} berhasil dibuka.`, "success");
+      window.setTimeout(() => {
+        state.reader.map.invalidateSize({ animate: false, pan: false });
+        renderReaderLabels();
+      }, 100);
+      showToast("GeoJSON valid", `${file.name} berhasil dibuka. ${state.reader.labelCount} nama polygon ditampilkan.`, "success");
     } catch (error) {
       setInlineMessage("readerUploadMessage", error.message, "error", false);
       showToast("File tidak dapat dibuka", firstLine(error.message), "error");
@@ -1635,8 +1673,17 @@
     updateReaderAreaStatus();
   }
 
+  // The selected shape is drawn in SVG (not the shared canvas) so it can carry a
+  // glow, and so its colour is inspectable/stable regardless of tile load.
+  function readerSvgRenderer() {
+    if (!state.reader.svgRenderer) state.reader.svgRenderer = L.svg({ padding: 0.4 });
+    return state.reader.svgRenderer;
+  }
+
   function renderReaderMap(fitAll = false) {
     const map = state.reader.map;
+    const features = getFeatures(state.reader.data);
+    if (fitAll) map.invalidateSize({ animate: false, pan: false });
     if (state.reader.allLayer) map.removeLayer(state.reader.allLayer);
     if (state.reader.selectedLayer) map.removeLayer(state.reader.selectedLayer);
 
@@ -1656,7 +1703,16 @@
         weight: 2,
         fillColor: "#72d64f",
         fillOpacity: 1
-      })
+      }),
+      onEachFeature: (_geoJsonFeature, layer) => {
+        // Tapping a polygon on the map selects it, the way the list rows do.
+        layer.on("click", (event) => {
+          if (event?.originalEvent) L.DomEvent.stopPropagation(event);
+          if (state.reader.editMode) return;
+          const index = features.findIndex((feature) => feature === layer.feature);
+          if (index >= 0) selectReaderFeature(index);
+        });
+      }
     }).addTo(map);
 
     if (fitAll && !fitLeafletLayer(map, state.reader.allLayer, 17)) {
@@ -1668,34 +1724,36 @@
   function renderReaderSelection(refit = false) {
     const map = state.reader.map;
     if (state.reader.selectedLayer) map.removeLayer(state.reader.selectedLayer);
+    if (state.reader.selectedHaloLayer) map.removeLayer(state.reader.selectedHaloLayer);
     state.reader.selectedLayer = null;
+    state.reader.selectedHaloLayer = null;
 
     const features = getFeatures(state.reader.data);
     const feature = features[state.reader.selectedIndex];
     if (!feature) {
       el("readerMapSelection").textContent = "NO SELECTION";
+      el("readerMapSelection").classList.remove("is-active");
       return;
     }
 
-    state.reader.selectedLayer = L.geoJSON(feature, {
-      style: {
-        color: "#72d64f",
-        weight: 4,
-        opacity: 1,
-        fillColor: "#8ee879",
-        fillOpacity: 0.28
-      },
-      pointToLayer: (_item, latlng) => L.circleMarker(latlng, {
-        radius: 9,
-        color: "#ffffff",
-        weight: 3,
-        fillColor: "#72d64f",
-        fillOpacity: 1
-      })
+    state.reader.selectedHaloLayer = L.geoJSON(feature, {
+      renderer: readerSvgRenderer(),
+      style: READER_SELECTED_HALO,
+      interactive: false,
+      pointToLayer: () => L.circleMarker([0, 0], { radius: 0, opacity: 0, fillOpacity: 0, interactive: false })
     }).addTo(map);
 
-    el("readerMapSelection").textContent = `FEATURE ${String(state.reader.selectedIndex + 1).padStart(2, "0")} / ${getGeometryLabel(feature.geometry).toUpperCase()}`;
+    state.reader.selectedLayer = L.geoJSON(feature, {
+      renderer: readerSvgRenderer(),
+      style: READER_SELECTED_STYLE,
+      pointToLayer: (_item, latlng) => L.circleMarker(latlng, READER_SELECTED_MARKER)
+    }).addTo(map);
+
+    const badge = el("readerMapSelection");
+    badge.textContent = `FEATURE ${String(state.reader.selectedIndex + 1).padStart(2, "0")} / ${getGeometryLabel(feature.geometry).toUpperCase()}`;
+    badge.classList.add("is-active");
     if (refit) fitLeafletLayer(map, state.reader.selectedLayer, 18);
+    scheduleReaderLabels();
   }
 
   function renderPropertyEditor() {
@@ -1846,6 +1904,8 @@
     renderFeatureList();
     renderReaderCoordinates();
     updateReaderAreaStatus();
+    state.reader.areaCache.clear();
+    scheduleReaderLabels();
     if (showSuccess) {
       setInlineMessage("readerEditorMessage", "Perubahan properties tersimpan di memory browser.", "success", false);
       showToast("Perubahan disimpan", "GeoJSON di memory telah diperbarui.", "success");
@@ -1877,6 +1937,234 @@
       }
     }
     return rawValue;
+  }
+
+  /* -------------------------------------------------------------------------- */
+  /* Reader: name labels on the map (toggleable, decluttered)                    */
+  /* -------------------------------------------------------------------------- */
+
+  function setupReaderLabels() {
+    const button = el("readerLabelBtn");
+    if (button) {
+      button.addEventListener("click", () => {
+        state.reader.showLabels = !state.reader.showLabels;
+        updateReaderLabelToggle();
+        renderReaderLabels();
+        if (!state.reader.showLabels) {
+          showToast("Nama polygon disembunyikan", "Peta kembali bersih; polygon terpilih tetap biru terang.", "info");
+        }
+      });
+    }
+    if (state.reader.map) {
+      state.reader.map.on("moveend", () => scheduleReaderLabels());
+      state.reader.map.on("zoomend", () => scheduleReaderLabels());
+    }
+    updateReaderLabelToggle();
+  }
+
+  function updateReaderLabelToggle() {
+    const button = el("readerLabelBtn");
+    if (!button) return;
+    const on = Boolean(state.reader.showLabels);
+    button.classList.toggle("is-active", on);
+    button.setAttribute("aria-pressed", String(on));
+    const count = el("readerLabelCount");
+    if (count) {
+      count.textContent = on ? formatCount(state.reader.labelCount) : "OFF";
+      count.title = on
+        ? `${state.reader.labelCount} nama polygon tampil di area peta ini${state.reader.labelHidden ? ` · ${formatCount(state.reader.labelHidden)} disembunyikan agar tidak bertumpuk` : ""}`
+        : "Klik untuk menampilkan nama polygon";
+    }
+    button.title = on
+      ? "Sembunyikan nama polygon di peta"
+      : "Tampilkan nama setiap polygon di peta";
+  }
+
+  function formatCount(value) {
+    return formatNumber(value, 0);
+  }
+
+  function scheduleReaderLabels() {
+    if (state.reader.labelQueued) return;
+    state.reader.labelQueued = true;
+    window.requestAnimationFrame(() => {
+      state.reader.labelQueued = false;
+      renderReaderLabels();
+    });
+  }
+
+  // Where a label belongs: centroid of the largest outer ring, so labels never
+  // float on top of a neighbouring polygon.
+  function readerLabelAnchor(geometry) {
+    if (!geometry || typeof geometry !== "object") return null;
+    const polygons = geometry.type === "Polygon"
+      ? [geometry.coordinates]
+      : geometry.type === "MultiPolygon" ? geometry.coordinates : null;
+
+    if (polygons) {
+      let best = null;
+      let bestArea = -1;
+      for (const polygon of polygons) {
+        const ring = Array.isArray(polygon) ? polygon[0] : null;
+        if (!Array.isArray(ring) || ring.length < 4) continue;
+        const centre = readerLabelCentroid(ring);
+        if (!centre) continue;
+        if (centre.area > bestArea) {
+          bestArea = centre.area;
+          best = centre;
+        }
+      }
+      if (best) return [best.lat, best.lng];
+    }
+
+    const rings = readerGeometryRings(geometry);
+    for (const ring of rings) {
+      const first = (ring.positions || []).find((position) => Array.isArray(position) && Number.isFinite(position[0]) && Number.isFinite(position[1]));
+      if (first) return [first[1], first[0]];
+    }
+    return null;
+  }
+
+  function readerLabelCentroid(positions) {
+    let sum = 0;
+    let x = 0;
+    let y = 0;
+    let count = 0;
+    for (let index = 0; index < positions.length; index += 1) {
+      const current = positions[index];
+      const next = positions[(index + 1) % positions.length];
+      if (!Array.isArray(current) || !Array.isArray(next)) continue;
+      if (!Number.isFinite(current[0]) || !Number.isFinite(current[1])) continue;
+      count += 1;
+      const cross = current[0] * next[1] - next[0] * current[1];
+      sum += cross;
+      x += (current[0] + next[0]) * cross;
+      y += (current[1] + next[1]) * cross;
+    }
+    if (!count) return null;
+    if (Math.abs(sum) < 1e-12) {
+      // Degenerate (collinear) ring: fall back to the vertex average.
+      let avgX = 0;
+      let avgY = 0;
+      let n = 0;
+      for (const position of positions) {
+        if (!Array.isArray(position) || !Number.isFinite(position[0]) || !Number.isFinite(position[1])) continue;
+        avgX += position[0];
+        avgY += position[1];
+        n += 1;
+      }
+      return n ? { lat: avgY / n, lng: avgX / n, area: 0 } : null;
+    }
+    return { lat: y / (3 * sum), lng: x / (3 * sum), area: Math.abs(sum) / 2 };
+  }
+
+  // Feature area in hectares, cached per feature index and dropped when its shape
+  // or properties change.
+  function readerFeatureHectares(feature, index) {
+    if (!feature) return null;
+    if (state.reader.areaCache.has(index)) return state.reader.areaCache.get(index);
+    const coords = readerFeatureCoordinates(feature, index);
+    const hectares = Number.isFinite(coords.area) ? Math.abs(coords.area) / 10000 : null;
+    state.reader.areaCache.set(index, hectares);
+    return hectares;
+  }
+
+  function renderReaderLabels() {
+    const map = state.reader.map;
+    if (!map) return;
+    if (state.reader.labelLayer) {
+      map.removeLayer(state.reader.labelLayer);
+      state.reader.labelLayer = null;
+    }
+
+    const finish = (count, hidden) => {
+      state.reader.labelCount = count;
+      state.reader.labelHidden = hidden;
+      updateReaderLabelToggle();
+    };
+
+    if (!state.reader.showLabels || !state.reader.data) {
+      finish(0, 0);
+      return;
+    }
+
+    const features = getFeatures(state.reader.data);
+    if (!features.length) {
+      finish(0, 0);
+      return;
+    }
+
+    const bounds = map.getBounds();
+    const zoom = map.getZoom();
+    const selected = state.reader.selectedIndex;
+    const candidates = [];
+    let hidden = 0;
+    const scanLimit = Math.min(features.length, READER_LABEL_SCAN_CAP);
+    hidden += Math.max(0, features.length - scanLimit);
+
+    for (let index = 0; index < scanLimit; index += 1) {
+      const feature = features[index];
+      const anchor = readerLabelAnchor(feature.geometry);
+      if (!anchor || !bounds.contains(L.latLng(anchor[0], anchor[1]))) continue;
+      const name = getFeatureName(feature, index);
+      const point = map.latLngToContainerPoint(L.latLng(anchor[0], anchor[1]));
+      const hectares = readerFeatureHectares(feature, index);
+      const type = feature?.geometry?.type || "";
+      const isPlanar = type === "Polygon" || type === "MultiPolygon";
+      const meta = isPlanar && Number.isFinite(hectares) ? `${formatNumber(hectares, hectares >= 100 ? 1 : 2)} ha` : "";
+      candidates.push({
+        index,
+        name,
+        lat: anchor[0],
+        lng: anchor[1],
+        x: point.x,
+        y: point.y,
+        width: Math.min(196, 18 + name.length * 6.9 + (meta ? meta.length * 6.2 + 16 : 0)),
+        // Bigger polygons — and the selected one — win the space when labels collide.
+        priority: (index === selected ? Number.MAX_SAFE_INTEGER : 0) + (isPlanar ? (hectares || 0) : 0),
+        meta
+      });
+    }
+
+    candidates.sort((a, b) => b.priority - a.priority);
+
+    const placed = [];
+    const group = L.layerGroup();
+    for (const candidate of candidates) {
+      if (placed.length >= READER_LABEL_CAP) {
+        hidden += 1;
+        continue;
+      }
+      const halfWidth = candidate.width / 2;
+      const overlaps = placed.some((box) => Math.abs(box.y - candidate.y) < 25 && Math.abs(box.x - candidate.x) < halfWidth + box.halfWidth + 10);
+      if (overlaps) {
+        hidden += 1;
+        continue;
+      }
+      placed.push({ x: candidate.x, y: candidate.y, halfWidth });
+      group.addLayer(L.marker([candidate.lat, candidate.lng], {
+        pane: "readerLabelPane",
+        interactive: true,
+        keyboard: false,
+        title: candidate.meta ? `${candidate.name} · ${candidate.meta}` : candidate.name,
+        icon: L.divIcon({
+          className: "map-label-pin",
+          html: `<span class="map-label${candidate.index === selected ? " is-selected" : ""}${zoom >= 14 ? " is-detailed" : ""}"><span class="map-label-name">${escapeHtml(candidate.name)}</span>${candidate.meta ? `<i class="map-label-meta">${escapeHtml(candidate.meta)}</i>` : ""}</span>`,
+          iconSize: [0, 0]
+        }),
+        riseOnHover: true
+      }).on("click", (event) => {
+        if (event?.originalEvent) L.DomEvent.stopPropagation(event);
+        if (state.reader.editMode) return;
+        selectReaderFeature(candidate.index);
+      }));
+    }
+
+    if (placed.length) {
+      group.addTo(map);
+      state.reader.labelLayer = group;
+    }
+    finish(placed.length, hidden);
   }
 
   /* -------------------------------------------------------------------------- */
@@ -2101,8 +2389,10 @@
     const map = state.reader.map;
     if (state.reader.allLayer) map.removeLayer(state.reader.allLayer);
     if (state.reader.selectedLayer) map.removeLayer(state.reader.selectedLayer);
+    if (state.reader.selectedHaloLayer) map.removeLayer(state.reader.selectedHaloLayer);
     state.reader.allLayer = null;
     state.reader.selectedLayer = null;
+    state.reader.selectedHaloLayer = null;
 
     const edit = buildEditableGeometry(geo);
     state.reader.editState = edit;
@@ -2115,6 +2405,7 @@
     button.title = "Seret titik untuk mengubah bentuk; klik lagi untuk selesai.";
 
     el("readerMapSelection").textContent = readerEditTargetName();
+    state.reader.map.getContainer().classList.add("is-editing");
     fitEditableGeometry(map, edit);
   }
 
@@ -2132,6 +2423,7 @@
     }
     state.reader.editState = null;
     state.reader.editMode = false;
+    state.reader.map.getContainer().classList.remove("is-editing");
 
     const button = el("readerEditPolygonBtn");
     button.classList.remove("is-active");
@@ -2177,12 +2469,14 @@
 
   function editablePolygonStyle() {
     return {
-      color: "#72d64f",
-      weight: 3,
+      color: "#3fc8ff",
+      weight: 4,
       opacity: 1,
-      fillColor: "#8ee879",
-      fillOpacity: 0.18,
-      dashArray: "4 4"
+      fillColor: "#1ea8f0",
+      fillOpacity: 0.16,
+      dashArray: "4 4",
+      className: "reader-selected-path",
+      renderer: readerSvgRenderer()
     };
   }
 
@@ -2241,6 +2535,8 @@
     updateReaderEditState();
     scheduleReaderCoordinates();
     updateReaderAreaStatus();
+    state.reader.areaCache.delete(state.reader.selectedIndex);
+    scheduleReaderLabels();
     setInlineMessage("readerEditorMessage", "", "", true);
     showToast("Bentuk diperbarui", `Titik ${vertexIndex + 1} pada polygon digeser.`, "success");
   }
